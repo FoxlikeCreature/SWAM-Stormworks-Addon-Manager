@@ -1,0 +1,57 @@
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: pip install pyinstaller pytest
+
+      - name: Run the test suite on Windows
+        run: python -m pytest tests/ -q
+
+      - name: Build (single exe)
+        run: >
+          pyinstaller --onefile --windowed --name SWAM
+          --add-data "swam/companion;swam/companion"
+          --paths .
+          scripts/gui_entry.py
+
+      - name: Build (portable folder - fewer antivirus false positives)
+        run: >
+          pyinstaller --onedir --windowed --name SWAM-portable
+          --add-data "swam/companion;swam/companion"
+          --paths .
+          scripts/gui_entry.py
+
+      - name: Zip the portable build
+        run: Compress-Archive -Path dist/SWAM-portable -DestinationPath dist/SWAM-portable-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SWAM-windows
+          path: |
+            dist/SWAM.exe
+            dist/SWAM-portable-windows.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/SWAM.exe
+            dist/SWAM-portable-windows.zip

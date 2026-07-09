@@ -1,0 +1,279 @@
+# SWAM - Stormworks Addon Manager
+
+![SWAM - add, remove and update addons in saves that already exist](assets/header.png)
+
+Add, remove, update and generally manage **addons and mods in your existing
+Stormworks: Build and Rescue saves** - the thing the game itself never lets
+you do after a world is created.
+
+> ⚠️ **Work in progress.** SWAM already works well (the full
+> add → play → remove cycle has been verified to restore a real save
+> byte-for-byte), but expect rough edges. Back up anything you love.
+> SWAM makes its own backups before every change, too.
+
+Works on **Windows** and **Linux / Steam Deck** (Proton).
+
+> **About AI:** English is not my native language, so the text in this
+> repo (README, descriptions) was written with the help of AI. The code
+> itself is written by hand. It used to be formatted and commented by AI
+> down to every function after I wrote it, so that anyone could understand
+> the structure and modify the script. However, many users started whining
+> about that - so now you get the code with no comments and no formatting
+> at all. This is why you can't have nice things.
+
+---
+
+## What it can do
+
+- **Attach and detach mods** (meshes, tiles, shaders) - takes effect on the
+  next game launch, no world reload logic needed.
+- **Attach addons** (missions, zones, structures, scripted logic) to a save
+  that already exists - including spawning their buildings and cranes on
+  the map, which the game only does at world creation.
+- **Detach addons cleanly** - the structures and objects they spawned are
+  removed from the world, not just the menu entry.
+- **Update addons** to their newest workshop version: old structures out,
+  new ones in, one world load.
+- **Edit addon settings** - the same sliders and checkboxes the game shows
+  at world creation, but for a world that already exists. Works because the
+  game never stores those values itself: scripts read the defaults from
+  their own text on every load and snapshot some of them into the save.
+  SWAM edits both.
+- **Keep you safe**: every operation makes a backup first, rolls back on
+  failure, refuses to run while the game is open, and an integrity check
+  (`verify`) can audit everything afterwards.
+
+## What it honestly cannot do
+
+- Addons that initialize **only** at world creation
+  (`if is_world_create ...` with no fallback) may misbehave when added to
+  an old save. SWAM inspects the script and warns you when it detects that
+  pattern.
+- Addons that were already in the save before SWAM ("inherited") have no
+  ownership records anywhere - removing *their* structures uses careful
+  coordinate matching (exact spawn-point positions with a small physics
+  tolerance, only on vehicles the game itself marks as addon-spawned),
+  which covers placed buildings but not things their scripts spawned in
+  the past. For those there is a manual fallback: stand next to the
+  structure in game, type `?swam mark` in chat, save - and SWAM removes it
+  (and, optionally, every identical copy on the map).
+- Indirect traces (money you earned from an addon's missions, loot you
+  picked up) stay. SWAM is a manager, not a time machine.
+
+---
+
+## Installation
+
+### Windows - the easy way (no terminal, nothing to install)
+
+1. Open the [Releases](../../releases) page.
+2. Download **`SWAM.exe`**.
+3. Double-click it. That's the whole installation.
+
+Windows SmartScreen may warn about an unknown publisher the first time -
+that's normal for small open-source tools; choose "More info → Run anyway".
+
+### Windows / Linux - from source
+
+You need Python 3.10+ (on Windows: [python.org](https://python.org), check
+"Add to PATH" during setup; on Linux you already have it - just make sure
+the Tk package is installed, e.g. `sudo pacman -S tk` or
+`sudo apt install python3-tk`).
+
+```sh
+git clone https://github.com/FoxlikeCreature/SWAM-Stormworks-Addon-Manager.git
+cd SWAM-Stormworks-Addon-Manager
+python -m swam gui
+```
+
+No third-party Python packages are required at all - the standard library
+is enough.
+
+---
+
+## Using the GUI
+
+<img width="860" height="640" alt="image" src="https://github.com/user-attachments/assets/8c27a8e1-ef29-4ba5-bd2e-de35282ec48e" />
+
+
+1. **Close Stormworks.** SWAM refuses to touch saves while the game runs
+   (your edits would be overwritten), so this is not optional.
+2. Launch SWAM. Pick your save in the dropdown at the top.
+3. You'll see everything attached to that save: mods, addons, and the
+   built-in vanilla addons (violet-tinted). Colored rows mean something:
+   green = SWAM's companion, amber = an update is available.
+4. **Install the companion** (one button, once per save). It's a tiny
+   in-game addon that acts as SWAM's agent: it records who spawned what and
+   does the actual spawning/removal inside the game. Without it, adding an
+   addon only registers it - buildings won't appear.
+   Even better: [subscribe to the companion on the workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3761466847)
+   and enable it when **creating** new worlds - then its journal covers
+   your world from day one, and SWAM recognizes it automatically.
+5. **Add addon…** opens a visual catalog: your workshop subscriptions,
+   local files and built-in content on separate tabs, with thumbnails.
+   Click a tile, or type in the search box; the box also accepts a raw
+   workshop id or a folder path.
+
+<img width="700" height="560" alt="image" src="https://github.com/user-attachments/assets/a83e8d22-c3c6-4d33-9920-28ec1bde2bf9" />
+
+6. After adding or removing an addon with structures, SWAM will tell you:
+   **load the save once**, wait a couple of seconds for the chat message
+   `[SWAM] tasks done`, then **save the game**. That's when the world
+   actually changes.
+7. **Remove selected** / **Upgrade selected** do what they say, with
+   appropriately worded warnings where you're about to do something you
+   shouldn't.
+8. **Settings…** opens the addon's world-creation sliders and checkboxes
+   for the selected addon. Values marked *per-save* live in this save;
+   values marked *default* live in the addon's local files and are read
+   fresh on every world load (by every save using that copy). Changes
+   apply from the next world load.
+9. **Remove marked…** is the manual fallback for structures nothing else
+   can attribute: in game, stand next to the offending structure, type
+   `?swam mark` in chat, save the game, close it - then click the button.
+   SWAM removes the marked structure and (optionally) every identical
+   copy of it on the map. Player-built vehicles are never touched: SWAM
+   only accepts vehicles the game itself marked as addon-spawned, with no
+   author list. Chat commands: `?swam` (status), `?swam mark`,
+   `?swam unmark`.
+
+## Using the CLI
+
+Everything the GUI does, scriptable:
+
+```sh
+swam saves                          # list saves
+swam list <save>                    # what's attached
+swam status <save>                  # managed addons + update check + verify
+swam manage <save>                  # interactive text mode
+
+swam install-companion <save>       # once per save
+swam add-addon <save> <id|path|name>
+swam remove-addon <save> <name>     # --force for inherited addons,
+                                    # --force-geometry to also remove their statics
+swam upgrade-addon <save> <name>    # refresh from workshop
+swam settings <save> <name>         # view addon settings
+swam settings <save> <name> --set "Label=value"   # change them
+swam cleanup <save> <name>          # despawn an addon's leftover structures
+                                    # (works even after the addon was removed)
+swam remove-marked <save> [--all]   # despawn structures marked in game
+                                    # with "?swam mark"
+swam add-mod <save> <id|path>
+swam remove-mod <save> <id>
+swam journal <save>                 # what the companion has recorded
+swam verify <save>                  # integrity audit
+```
+
+Every mutating command accepts `--dry-run` (show the diff, change nothing)
+and `--no-backup`. Backups live in `~/.local/share/swam/backups/`
+(`%LOCALAPPDATA%\swam\backups` on Windows), the last 5 per save are kept.
+If your game lives somewhere unusual, point `SWAM_SW_ROOT` at the folder
+containing `saves` and `data`.
+
+---
+
+## How it works?
+
+Stormworks stores each save as a folder of mostly-readable files. The game
+loads them honestly on every launch - it just never offers UI to change
+the addon list after world creation. SWAM fills that gap with three
+cooperating parts:
+
+![How SWAM works: the app edits the save and queues tasks; the companion executes them in-game](assets/how-it-works.png)
+
+### 1. The CLI/GUI (outside the game)
+
+A save's `scene.xml` contains three lists that matter:
+
+- `<active_mods>` - attached mods (plain list, no state);
+- `<active_playlists>` - every attached addon;
+- `<scripts>` - addons that have a Lua script, each with a `script_id`
+  number binding it to its persistent state file
+  (`script_data/<id>.xml` = the addon's serialized `g_savedata`).
+
+SWAM edits these lists while the game is closed. Notably, `scene.xml`
+**cannot be parsed by standard XML libraries** - the game writes attributes
+with digit-leading names like `<initial_transform 30="..."/>`, which is
+invalid XML. So SWAM performs anchored text surgery instead: every edit
+targets an anchor that must occur exactly once, tag balance is verified
+before writing, and any ambiguity means refusal, not guessing.
+
+Two hard-won rules are baked in:
+
+- **`script_id`s are never renumbered.** Each number binds an addon to its
+  saved state; the game happily tolerates and preserves gaps in the
+  numbering (verified experimentally), so removal simply leaves a hole.
+- **Nothing is written while the game runs** - the game rewrites the whole
+  save when it saves, so concurrent edits would be lost silently.
+
+### 2. The companion addon (inside the game)
+
+<img width="904" height="228" alt="image" src="https://github.com/user-attachments/assets/2432694a-a384-4f8b-a329-c4fa7acb3bb8" />
+
+Some things can only be done by the game itself: an addon added to an
+existing save never spawns its structures (that happens only at world
+creation), and the save stores **no record of which addon spawned which
+vehicle** - nothing to base clean removal on.
+
+The companion is a small Lua addon SWAM installs into the save. It does
+two jobs:
+
+- **Provenance journal.** The engine fires an event
+  (`onSpawnAddonComponent`) every time any addon spawns something, and it
+  names the addon. The companion records `addon name → spawned ids` in its
+  own persistent state. From that moment SWAM *knows* what belongs to
+  whom - including things spawned by other addons' scripts at runtime.
+- **Task execution.** Spawning a newly added addon's locations on their
+  home tiles, and despawning recorded entities of a removed one - using
+  the engine's own spawn/despawn calls rather than file surgery, because
+  vehicle files in the save are an opaque binary format.
+
+### 3. The channel between them
+
+There is no socket and no shared file protocol - the trick is that the
+companion's own state file **is** the channel. The CLI writes tasks
+directly into `script_data/<id>.xml`; on load the game deserializes that
+into the companion's `g_savedata`; the companion executes the tasks and
+writes reports into the same structure; saving the game persists it all
+back to disk, where the CLI reads the results. Task effects and task
+status are saved atomically together by the game itself, which makes the
+whole flow crash-safe: if you quit without saving, both the effect and the
+"done" mark vanish together, and the task simply re-runs next time.
+
+### The lock file
+
+`~/.local/share/swam/locks/<save>.json`
+(`%LOCALAPPDATA%\swam\locks` on Windows) records what SWAM itself
+installed: source, content hash, script id. That's how it distinguishes
+addons it manages (fully guaranteed clean removal) from inherited ones
+(best-effort, with explicit `--force` consent), and how `status` knows an
+update is available - it compares the content digest of your local copy
+against the subscribed workshop version.
+
+### Verified against the real thing
+
+The design isn't theoretical: the format behaviors above (the
+`is_world_create` semantics, script_id gap tolerance, the provenance
+event, structure spawning on home tiles) were each established by
+experiments on real saves, and the full cycle - add an addon, watch 50
+vehicles appear, remove it, get a world byte-identical to the original -
+has been performed on a live career-style save. The g_savedata codec
+round-trips all 210 state files found on the development machine, and CI
+runs the core test suite on Windows to keep both platforms honest.
+
+---
+
+## Building the Windows exe yourself
+
+```sh
+pip install pyinstaller
+pyinstaller --onefile --windowed --name SWAM \
+  --add-data "swam/companion;swam/companion" --paths . scripts/gui_entry.py
+```
+
+Or just push a `v*` tag - GitHub Actions builds and attaches the exe to
+the release automatically.
+
+## License
+
+MIT. Not affiliated with Geometa (the developers of Stormworks).
