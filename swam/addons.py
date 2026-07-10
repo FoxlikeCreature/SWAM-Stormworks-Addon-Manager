@@ -90,6 +90,11 @@ def update_available(rec:dict,name:str)->bool:
   return src_digest!=known
  local_dir=paths.sw_root()/"data"/"missions"/name
  return local_dir.is_dir()and src_digest!=dir_digest(local_dir)
+def local_playlist_changed(rec:dict,name:str)->bool:
+ from.import lock
+ pl=paths.sw_root()/"data"/"missions"/name/"playlist.xml"
+ known=rec.get("playlist_hash")
+ return known is not None and pl.is_file()and lock.file_hash(pl)!=known
 def install_files(ref:AddonRef)->Path:
  dest=ref.local_dir()
  if ref.disk_path==dest:

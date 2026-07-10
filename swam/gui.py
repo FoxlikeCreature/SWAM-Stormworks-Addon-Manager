@@ -423,21 +423,24 @@ class App(ttk.Frame):
    for aname,rec in managed.items():
     try:
      if addons.update_available(rec,aname):
-      found.append(aname)
+      found.append((aname,"update available"))
+     elif addons.local_playlist_changed(rec,aname):
+      found.append((aname,"local edits - upgrade to apply"))
     except Exception:
      pass
    self._updates_queue.put((save_name,found))
   threading.Thread(target=work,daemon=True).start()
- def _apply_updates(self,save_name:str,names:list[str]):
+ def _apply_updates(self,save_name:str,names:list):
   self._update_check_running=False
   if self.current_save()!=save_name:
    return
+  labels=dict(names)
   for iid in self.tree.get_children():
    tags=self.tree.item(iid,"tags")
-   if len(tags)>=2 and tags[0]=="addon"and tags[1]in names:
+   if len(tags)>=2 and tags[0]=="addon"and tags[1]in labels:
     vals=list(self.tree.item(iid,"values"))
-    if"update available"not in vals[2]:
-     vals[2]+=" - update available"
+    if labels[tags[1]]not in vals[2]:
+     vals[2]+=f" - {labels[tags[1]]}"
     self.tree.item(iid,values=vals,tags=(*tags,"update"))
  def _remove_batch(self,save:str,sel):
   mods_,managed_,inherited_,skipped=[],[],[],[]
@@ -485,14 +488,31 @@ class App(ttk.Frame):
   if kind!="addon":
    messagebox.showinfo("SWAM","Select an addon installed by SWAM ""to upgrade it from the workshop.")
    return
-  if ident not in lock.load(save)["addons"]:
+  rec=lock.load(save)["addons"].get(ident)
+  if rec is None:
    messagebox.showinfo("SWAM",f"'{ident}' was not installed by SWAM - upgrades "f"only work for addons it manages.")
    return
-  if not messagebox.askyesno("SWAM",f"Upgrade '{ident}' from its workshop version?\n\n"f"On next world load the old structures are removed and "f"the new ones spawned."):
-   return
+  try:
+   ws_update=addons.update_available(rec,ident)
+   local_changed=addons.local_playlist_changed(rec,ident)
+  except Exception:
+   ws_update,local_changed=True,False
+  use_local=False
+  if ws_update and local_changed:
+   ans=messagebox.askyesnocancel("SWAM",f"'{ident}' has manual edits in data/missions AND a newer "f"workshop version.\n\n"f"Yes - keep your edits, refresh the save from them\n"f"No - discard the edits, take the workshop version")
+   if ans is None:
+    return
+   use_local=ans
+  elif local_changed:
+   if not messagebox.askyesno("SWAM",f"Refresh '{ident}' from its edited local copy?\n\n"f"On next world load the old structures are removed and "f"the ones from your edited playlist spawned."):
+    return
+   use_local=True
+  else:
+   if not messagebox.askyesno("SWAM",f"Upgrade '{ident}' from its workshop version?\n\n"f"On next world load the old structures are removed and "f"the new ones spawned."):
+    return
   def op():
    from.cli import cmd_upgrade_addon
-   cmd_upgrade_addon(_Args(save=save,addon=ident,dry_run=False,no_backup=False))
+   cmd_upgrade_addon(_Args(save=save,addon=ident,dry_run=False,no_backup=False,local=use_local,discard_local=not use_local))
   self.run_op(f"upgrade addon {ident}",op,done=self._needs_game_note)
  def remove_marked(self):
   save=self.current_save()

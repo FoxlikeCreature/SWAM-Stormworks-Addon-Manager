@@ -240,3 +240,21 @@ def test_companion_found_when_subscribed_from_workshop(sw_root,tmp_path):
  scene.add_script(game_path,store=3)
  assert companion.script_id(scene)is not None
  assert companion.is_installed(scene)
+def test_upgrade_from_edited_local_copy(sw_root):
+ run_cli("install-companion","testsave","--no-backup")
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ from swam import addons,lock,savedata
+ rec=lock.load("testsave")["addons"]["Zone Pack"]
+ assert not addons.local_playlist_changed(rec,"Zone Pack")
+ pl=sw_root/"data"/"missions"/"Zone Pack"/"playlist.xml"
+ pl.write_text(pl.read_text().replace('location_id_counter="1"','location_id_counter="2"'))
+ assert addons.local_playlist_changed(rec,"Zone Pack")
+ run_cli("upgrade-addon","testsave","Zone Pack","--no-backup")
+ data=savedata.load_file(sw_root/"saves"/"testsave"/"script_data"/"1.xml")
+ acts=[t["action"]for t in data["tasks"].values()]
+ assert acts.count("spawn_env")==2
+ rec=lock.load("testsave")["addons"]["Zone Pack"]
+ assert not addons.local_playlist_changed(rec,"Zone Pack")
+ run_cli("upgrade-addon","testsave","Zone Pack","--local","--no-backup")
+ data2=savedata.load_file(sw_root/"saves"/"testsave"/"script_data"/"1.xml")
+ assert len(data2["tasks"])==len(data["tasks"])

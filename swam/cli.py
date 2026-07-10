@@ -158,20 +158,27 @@ def cmd_upgrade_addon(args):
  name=args.addon
  if name not in lk["addons"]:
   raise SystemExit(f"addon '{name}' is not managed by SWAM - upgrade "f"only works for addons it installed")
- src=addons.find_workshop_source(name)
- if src is None:
-  raise SystemExit(f"no subscribed workshop item carries the addon "f"'{name}' - nothing to upgrade from")
+ rec=lk["addons"][name]
  local_dir=paths.sw_root()/"data"/"missions"/name
- if not addons.update_available(lk["addons"][name],name):
-  print("already up to date")
+ if not(local_dir/"playlist.xml").is_file():
+  raise SystemExit(f"{local_dir} has no playlist.xml - the addon's local "f"files are gone, nothing to work from")
+ src=None if args.local else addons.find_workshop_source(name)
+ local_changed=addons.local_playlist_changed(rec,name)
+ from_workshop=src is not None and addons.update_available(rec,name)
+ if from_workshop and local_changed and not args.discard_local:
+  raise SystemExit(f"the local copy of '{name}' has manual edits AND the "f"workshop has a newer version. Pick one:\n"f"  --local          keep your edits, refresh the save from them\n"f"  --discard-local  replace the local copy with the workshop version")
+ if not from_workshop and not local_changed:
+  print("already up to date (script.lua edits in data/missions apply on ""every load by themselves - only playlist.xml changes need an ""upgrade)")
   return
- if src.name!=name:
+ if from_workshop and src.name!=name:
   raise SystemExit(f"the workshop version renamed the addon to "f"'{src.name}' - that changes save entries; "f"remove and re-add instead")
  sid=companion.script_id(scene)
  if sid is None:
   raise SystemExit("the companion is required for upgrades ""(swam install-companion)")
+ source_desc=str(src.disk_path)if from_workshop else f"local edits in {local_dir}"
  if args.dry_run:
-  print(f"would upgrade '{name}' from {src.disk_path}\n"f"(despawn old structures -> replace files -> respawn)")
+  steps="despawn old structures -> replace files -> respawn"if from_workshop else"despawn old structures -> respawn from the edited playlist"
+  print(f"would upgrade '{name}' from {source_desc}\n({steps})")
   return
  import shutil
  with Transaction(save,f"upgrade-addon {name}",enabled=not args.no_backup)as tx:
@@ -179,22 +186,25 @@ def cmd_upgrade_addon(args):
   vehicles,objects=jr.get("v",{}),jr.get("o",{})
   if vehicles or objects:
    companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":vehicles,"objects":objects})
-  shutil.rmtree(local_dir)
-  shutil.copytree(src.disk_path,local_dir)
+  if from_workshop:
+   shutil.rmtree(local_dir)
+   shutil.copytree(src.disk_path,local_dir)
   companion.queue_task(save,sid,{"action":"spawn_env","addon":name})
-  settings=lk["addons"][name].get("settings")or{}
-  if settings:
-   try:
-    report,applied=properties.apply(save,name,scene,settings)
-    print(f"re-applied {len(applied)} saved setting(s)")
-   except SystemExit as e:
-    print(f"could not re-apply saved settings: {e}")
-  lk["addons"][name]["playlist_hash"]=lock.file_hash(local_dir/"playlist.xml")
-  lk["addons"][name]["source_digest"]=addons.dir_digest(src.disk_path)
+  if from_workshop:
+   settings=rec.get("settings")or{}
+   if settings:
+    try:
+     report,applied=properties.apply(save,name,scene,settings)
+     print(f"re-applied {len(applied)} saved setting(s)")
+    except SystemExit as e:
+     print(f"could not re-apply saved settings: {e}")
+   rec["source_digest"]=addons.dir_digest(src.disk_path)
+  rec["playlist_hash"]=lock.file_hash(local_dir/"playlist.xml")
   lock.store(save.name,lk)
  if tx.backup:
   print(f"backup: {tx.backup}")
- print("upgraded. On next world load the companion removes the old ""structures and spawns the new ones (in that order) - then save")
+ what="the workshop version"if from_workshop else"your edited local copy"
+ print(f"upgraded from {what}. On next world load the companion removes "f"the old structures and spawns the new ones (in that order) - "f"then save")
 def cmd_cleanup(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
@@ -418,7 +428,9 @@ def cmd_status(args):
    kind="scripted"if rec["scripted"]else"scriptless"
    note=""
    if addons.update_available(rec,name):
-    note="  [update available: swam upgrade-addon]"
+    note+="  [update available: swam upgrade-addon]"
+   if addons.local_playlist_changed(rec,name):
+    note+="  [local playlist edited: swam upgrade-addon --local]"
    print(f"  {name} ({kind}, installed {rec['installed_at']}){note}")
  problems=verify.run(save)
  print(f"verify: {'ok'if not problems else f'{len(problems)} problem(s)'}")
@@ -434,7 +446,7 @@ def build_parser():
  sp=sub.add_parser("list",help="show what is attached to a save")
  sp.add_argument("save")
  sp.set_defaults(fn=cmd_list)
- for name,fn,arg,help_ in(("add-mod",cmd_add_mod,"mod","attach a mod"),("remove-mod",cmd_remove_mod,"mod","detach a mod"),("add-addon",cmd_add_addon,"addon","attach an addon"),("remove-addon",cmd_remove_addon,"addon","detach an addon"),("upgrade-addon",cmd_upgrade_addon,"addon","refresh a SWAM-installed addon from workshop")):
+ for name,fn,arg,help_ in(("add-mod",cmd_add_mod,"mod","attach a mod"),("remove-mod",cmd_remove_mod,"mod","detach a mod"),("add-addon",cmd_add_addon,"addon","attach an addon"),("remove-addon",cmd_remove_addon,"addon","detach an addon"),("upgrade-addon",cmd_upgrade_addon,"addon","refresh a SWAM-installed addon from the workshop ""or from its edited local copy")):
   sp=sub.add_parser(name,help=help_)
   sp.add_argument("save")
   sp.add_argument(arg,help="workshop id, path or name")
@@ -443,6 +455,9 @@ def build_parser():
   if name=="remove-addon":
    sp.add_argument("--force",action="store_true",help="remove entries of an inherited addon")
    sp.add_argument("--force-geometry",action="store_true",help="despawn an inherited addon's structures by ""coordinate matching (a compromise)")
+  if name=="upgrade-addon":
+   sp.add_argument("--local",action="store_true",help="refresh the save from the (edited) local copy in ""data/missions instead of the workshop")
+   sp.add_argument("--discard-local",action="store_true",help="overwrite local manual edits with the workshop version")
   sp.set_defaults(fn=fn)
  for name,fn,help_ in(("verify",cmd_verify,"check integrity"),("status",cmd_status,"save and lock state"),("journal",cmd_journal,"provenance journal"),("backups",cmd_backups,"list backups")):
   sp=sub.add_parser(name,help=help_)

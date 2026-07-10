@@ -31,7 +31,9 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
 - **Detach addons cleanly** - the structures and objects they spawned are
   removed from the world, not just the menu entry.
 - **Update addons** to their newest workshop version: old structures out,
-  new ones in, one world load.
+  new ones in, one world load. Works for hand-edited local copies too:
+  change an addon's `playlist.xml` in `data/missions` and SWAM notices,
+  then refreshes the world from your edited version on request.
 - **Edit addon settings** - the same sliders and checkboxes the game shows
   at world creation, but for a world that already exists. Works because the
   game never stores those values itself: scripts read the defaults from
@@ -149,7 +151,10 @@ swam install-companion <save>       # once per save
 swam add-addon <save> <id|path|name>
 swam remove-addon <save> <name>     # --force for inherited addons,
                                     # --force-geometry to also remove their statics
-swam upgrade-addon <save> <name>    # refresh from workshop
+swam upgrade-addon <save> <name>    # refresh from workshop, or with
+                                    # --local from your edited copy in
+                                    # data/missions (--discard-local
+                                    # overwrites edits with workshop)
 swam settings <save> <name>         # view addon settings
 swam settings <save> <name> --set "Label=value"   # change them
 swam cleanup <save> <name>          # despawn an addon's leftover structures
