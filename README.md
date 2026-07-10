@@ -1,27 +1,25 @@
 # SWAM - Stormworks Addon Manager
 
 ![SWAM - add, remove and update addons in saves that already exist](assets/header.png)
-
 Add, remove, update and generally manage **addons and mods in your existing
 Stormworks: Build and Rescue saves** - the thing the game itself never lets
-you do after a world is created.
+you do after a world is created. Works on **Windows** and **Linux / Steam Deck** (Proton).
 
 > ⚠️ **Work in progress.** SWAM already works well (the full
 > add → play → remove cycle has been verified to restore a real save
 > byte-for-byte), but expect rough edges. Back up anything you love.
 > SWAM makes its own backups before every change, too.
 
-Works on **Windows** and **Linux / Steam Deck** (Proton).
 
-> **About AI:** English is not my native language, so the text in this
-> repo (README, descriptions) was written with the help of AI. The code
-> itself is written by hand. It used to be formatted and commented by AI
-> down to every function after I wrote it, so that anyone could understand
-> the structure and modify the script. However, many users started whining
-> about that - so now you get the code with no comments and no formatting
-> at all. This is why you can't have nice things.
 
+> ## About AI and accusations
+> English is not my native language, so this README was written with AI assistance.
+> The entire project logic, architecture, and code were written by me. AI was used **afterwards** only for English text, comments, and readability improvements. I wanted the code to be very understandable and readable.
+> After a wave of accusations, "AI slop" claims, and demands to remove any trace of AI, I stripped out **all** comments and formatting. The code now ships in a raw, minified state. It works perfectly - that's what matters.
+> If you're here just to complain about AI readme or question the authenticity of the project - **go fuck yourself**. I have zero interest in arguing with your biases. The tool solves a real problem and actually works.
 ---
+
+
 
 ## What it can do
 
