@@ -468,3 +468,23 @@ def test_corrupted_files_are_refused_with_a_clear_message(sw_root):
  sd.write_text("")
  with pytest.raises(SystemExit,match="not readable as addon state"):
   savedata.load_file(sd)
+def test_journal_beats_geometry_when_they_disagree(sw_root):
+ from swam import geometry
+ d=sw_root/"data"/"missions"/"Tower Pack"
+ d.mkdir()
+ (d/"playlist.xml").write_text(TOWER_PLAYLIST)
+ vids,_=geometry.match(GEO_SCENE,"Tower Pack",[])
+ assert 50 in vids,"the matcher normally claims this structure"
+ vids2,warns=geometry.match(GEO_SCENE,"Tower Pack",[],owned_elsewhere={50})
+ assert 50 not in vids2,"a vehicle the journal gives to another addon is never claimed"
+ assert any("journal"in w for w in warns)
+def test_addon_added_before_the_companion_spawns_later(sw_root):
+ from swam import companion,lock,paths,savedata
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ assert lock.load("testsave")["addons"]["Zone Pack"]["pending_spawn"]is True
+ run_cli("install-companion","testsave","--no-backup")
+ sid=1
+ data=savedata.load_file(paths.save_dir("testsave")/"script_data"/f"{sid}.xml")
+ tasks=[t for t in data["tasks"].values()if t["addon"]=="Zone Pack"]
+ assert tasks and tasks[0]["action"]=="spawn_env"
+ assert lock.load("testsave")["addons"]["Zone Pack"]["pending_spawn"]is False

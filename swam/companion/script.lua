@@ -75,16 +75,31 @@ end
 return "spawned " .. tostring(task.addon) .. ": locations " .. spawned ..
 ", no-tile " .. skipped .. ", failed " .. failed
 end
+local function forget(addon, kind, id)
+local rec = g_savedata.journal[addon]
+if rec == nil or rec[kind] == nil then return end
+for i, known in pairs(rec[kind]) do
+if known == id then rec[kind][i] = nil end
+end
+end
 local function do_despawn(task)
 local n = 0
 if task.vehicles then
 for _, vid in pairs(task.vehicles) do
-if server.despawnVehicle(math.floor(vid), true) then n = n + 1 end
+local id = math.floor(vid)
+if server.despawnVehicle(id, true) then
+n = n + 1
+forget(task.addon, "v", id)
+end
 end
 end
 if task.objects then
 for _, oid in pairs(task.objects) do
-if server.despawnObject(math.floor(oid), true) then n = n + 1 end
+local id = math.floor(oid)
+if server.despawnObject(id, true) then
+n = n + 1
+forget(task.addon, "o", id)
+end
 end
 end
 return "despawned " .. tostring(task.addon or "?") .. ": removed " .. n
@@ -128,34 +143,15 @@ debug.log("[SWAM] pruned " .. drop .. " finished task(s) from the save")
 end
 end
 local function clean_journal()
-local removed, forgotten = 0, 0
+local forgotten = 0
 for name, rec in pairs(g_savedata.journal) do
-if rec.o then
-for i, id in pairs(rec.o) do
-local _, ok = server.getObjectPos(id)
-if not ok then
-rec.o[i] = nil
-removed = removed + 1
-end
-end
-end
-if rec.v then
-for i, id in pairs(rec.v) do
-local _, ok = server.getVehiclePos(id)
-if not ok then
-rec.v[i] = nil
-removed = removed + 1
-end
-end
-end
 if count(rec.v) == 0 and count(rec.o) == 0 then
 g_savedata.journal[name] = nil
 forgotten = forgotten + 1
 end
 end
-if removed > 0 or forgotten > 0 then
-debug.log("[SWAM] journal cleanup: dropped " .. removed ..
-" dead ids and " .. forgotten .. " empty record(s)")
+if forgotten > 0 then
+debug.log("[SWAM] journal cleanup: forgot " .. forgotten .. " empty record(s)")
 end
 end
 function onTick(game_ticks)

@@ -9,7 +9,19 @@ def _dist(a:tuple,b:tuple)->float:
  dy=abs(a[1]-b[1])
  dz=min(abs(a[2]-b[2]),1000-abs(a[2]-b[2]))
  return(dx*dx+dy*dy+dz*dz)**0.5
+_SIG_CACHE:dict[tuple,set]={}
 def playlist_signatures(playlist_xml:Path)->set[tuple]:
+ try:
+  key=(str(playlist_xml),playlist_xml.stat().st_mtime_ns)
+ except OSError:
+  key=None
+ if key is not None and key in _SIG_CACHE:
+  return _SIG_CACHE[key]
+ sigs=_read_signatures(playlist_xml)
+ if key is not None:
+  _SIG_CACHE[key]=sigs
+ return sigs
+def _read_signatures(playlist_xml:Path)->set[tuple]:
  text=playlist_xml.read_text(errors="replace")
  sigs=set()
  for c in re.finditer(r"<c [^>]*>(.*?)</c>",text,re.S):
@@ -54,9 +66,10 @@ def addon_attested(scene_text:str)->set[int]:
   if(('is_mission="true"'in attrs or"addon_tags="in attrs)and re.search(r"<authors\s*/>",m.group(3))):
    ok.add(int(m.group(1)))
  return ok
-def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE)->tuple[list[int],list[str]]:
+def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE,owned_elsewhere:set|None=None)->tuple[list[int],list[str]]:
  from.import addons
  warnings=[]
+ owned_elsewhere=owned_elsewhere or set()
  target_dir=None
  for v in active_playlists:
   if addons.playlist_name(v)==addon_name:
@@ -85,6 +98,9 @@ def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:flo
  for g in scene_groups(scene_text):
   near=[t for t in target if _dist(t,g["sig"])<=tolerance]
   if not near:
+   continue
+  if any(v in owned_elsewhere for v in g["vehicles"]):
+   warnings.append(f"group {g['group_id']} sits on a spawn point of "f"'{addon_name}', but the companion's journal says another "f"addon spawned it - leaving it alone")
    continue
   if not all(v in attested for v in g["vehicles"]):
    warnings.append(f"group {g['group_id']} sits on a spawn point "f"but the game does not mark it as addon-spawned "f"- leaving it alone")

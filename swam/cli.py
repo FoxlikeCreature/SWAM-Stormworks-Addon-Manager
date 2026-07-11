@@ -80,7 +80,9 @@ def cmd_add_addon(args):
    companion.queue_task(save,sid,{"action":"spawn_env","addon":ref.name})
    print("companion task queued: spawn the addon's structures on ""next world load (save the game afterwards)")
   else:
-   print("companion is not installed - static structures will not ""appear by themselves (swam install-companion)")
+   rec["pending_spawn"]=True
+   lock.store(save.name,lk)
+   print("companion is not installed - the addon's structures cannot ""spawn yet.\nInstall the companion (swam install-companion) ""and SWAM will spawn them then")
  if tx.backup:
   print(f"backup: {tx.backup}")
  print("done")
@@ -121,7 +123,8 @@ def cmd_remove_addon(args):
    vehicles=dict(jr.get("v",{}))
    objects=jr.get("o",{})
    if args.force_geometry and not managed:
-    geo_vids,warns=geometry.match(scene.text,name,scene.list_playlists()+[f"data/missions/{name}"])
+    others={int(v)for aname,rec in companion.journal(save,sid).items()if aname!=name for v in rec.get("v",{}).values()}
+    geo_vids,warns=geometry.match(scene.text,name,scene.list_playlists()+[addons.value_for(name)],owned_elsewhere=others)
     for w in warns:
      print(f"  geometry: {w}")
     base=max(vehicles,default=0)
@@ -160,9 +163,19 @@ def cmd_install_companion(args):
  with Transaction(save,"install-companion",enabled=not args.no_backup)as tx:
   companion.install_files()
   scene.write()
+  lk=lock.load(save.name)
+  waiting=[n for n,rec in lk["addons"].items()if rec.get("pending_spawn")]
+  for n in waiting:
+   companion.queue_task(save,sid,{"action":"spawn_env","addon":n})
+   lk["addons"][n]["pending_spawn"]=False
+  if waiting:
+   lock.store(save.name,lk)
+   print(f"queued the structures of {len(waiting)} addon(s) added before "f"the companion existed: {', '.join(waiting)}")
  if tx.backup:
   print(f"backup: {tx.backup}")
  print(f"companion installed (script_id={sid}). It starts keeping the "f"provenance journal after the save is loaded; chat command: ?swam")
+ if waiting:
+  print("load the save once, wait for the \"[SWAM] tasks done\" chat ""message, then save the game")
 def cmd_upgrade_addon(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
@@ -248,10 +261,10 @@ def cmd_cleanup(args):
  sid=companion.script_id(scene)
  if sid is None:
   raise SystemExit("the companion is required for cleanup ""(swam install-companion)")
- vids,warns=geometry.match(scene.text,name,scene.list_playlists())
+ known={int(v)for rec in companion.journal(save,sid).values()for v in rec.get("v",{}).values()}
+ vids,warns=geometry.match(scene.text,name,scene.list_playlists(),owned_elsewhere=known)
  for w in warns:
   print(f"  geometry: {w}")
- known={int(v)for rec in companion.journal(save,sid).values()for v in rec.get("v",{}).values()}
  vids=[v for v in vids if v not in known]
  if not vids:
   print("no leftover structures of this addon matched - nothing to do")
