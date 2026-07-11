@@ -123,18 +123,23 @@ def cmd_remove_addon(args):
    vehicles=dict(jr.get("v",{}))
    objects=jr.get("o",{})
    if args.force_geometry and not managed:
-    others={int(v)for aname,rec in companion.journal(save,sid).items()if aname!=name for v in rec.get("v",{}).values()}
-    geo_vids,warns=geometry.match(scene.text,name,scene.list_playlists()+[addons.value_for(name)],owned_elsewhere=others)
+    jr_all=companion.journal(save,sid)
+    others={int(x)for aname,rec in jr_all.items()if aname!=name for kind in("v","o")for x in rec.get(kind,{}).values()}
+    geo_vids,geo_oids,warns=geometry.match_all(scene.text,name,scene.list_playlists()+[addons.value_for(name)],owned_elsewhere=others)
     for w in warns:
      print(f"  geometry: {w}")
-    base=max(vehicles,default=0)
-    known=set(vehicles.values())
+    objects=dict(objects)
     added=0
-    for v in geo_vids:
-     if v not in known:
-      added+=1
-      vehicles[base+added]=float(v)
-    print(f"  geometry: matched {len(geo_vids)} vehicles, "f"{added} new queued for despawn")
+    for pool,found in((vehicles,geo_vids),(objects,geo_oids)):
+     base=max(pool,default=0)
+     known=set(pool.values())
+     n=0
+     for x in found:
+      if x not in known:
+       n+=1
+       added+=1
+       pool[base+n]=float(x)
+    print(f"  geometry: matched {len(geo_vids)} vehicles and "f"{len(geo_oids)} objects, {added} new queued for despawn")
    if vehicles or objects:
     companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":vehicles,"objects":objects})
     print(f"companion task queued: remove {len(vehicles)} "f"vehicles and {len(objects)} objects on next world "f"load (save the game afterwards)")
@@ -261,22 +266,25 @@ def cmd_cleanup(args):
  sid=companion.script_id(scene)
  if sid is None:
   raise SystemExit("the companion is required for cleanup ""(swam install-companion)")
- known={int(v)for rec in companion.journal(save,sid).values()for v in rec.get("v",{}).values()}
- vids,warns=geometry.match(scene.text,name,scene.list_playlists(),owned_elsewhere=known)
+ jr=companion.journal(save,sid)
+ known_v={int(x)for rec in jr.values()for x in rec.get("v",{}).values()}
+ known_o={int(x)for rec in jr.values()for x in rec.get("o",{}).values()}
+ vids,oids,warns=geometry.match_all(scene.text,name,scene.list_playlists(),owned_elsewhere=known_v|known_o)
  for w in warns:
   print(f"  geometry: {w}")
- vids=[v for v in vids if v not in known]
- if not vids:
+ vids=[v for v in vids if v not in known_v]
+ oids=[o for o in oids if o not in known_o]
+ if not vids and not oids:
   print("no leftover structures of this addon matched - nothing to do")
   return
  if args.dry_run:
-  print(f"(dry-run) would despawn {len(vids)} vehicles: "f"{sorted(vids)}")
+  print(f"(dry-run) would despawn {len(vids)} vehicles {sorted(vids)} "f"and {len(oids)} objects {sorted(oids)}")
   return
  with Transaction(save,f"cleanup {name}",enabled=not args.no_backup)as tx:
-  companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":{i+1:float(v)for i,v in enumerate(sorted(vids))},"objects":{}})
+  companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":{i+1:float(v)for i,v in enumerate(sorted(vids))},"objects":{i+1:float(o)for i,o in enumerate(sorted(oids))}})
  if tx.backup:
   print(f"backup: {tx.backup}")
- print(f"queued: {len(vids)} vehicles will be despawned on next world "f"load (save the game afterwards)")
+ print(f"queued: {len(vids)} vehicles and {len(oids)} objects will be "f"despawned on next world load (save the game afterwards)")
 def cmd_remove_marked(args):
  import hashlib
  save=paths.save_dir(args.save)

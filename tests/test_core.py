@@ -488,3 +488,22 @@ def test_addon_added_before_the_companion_spawns_later(sw_root):
  tasks=[t for t in data["tasks"].values()if t["addon"]=="Zone Pack"]
  assert tasks and tasks[0]["action"]=="spawn_env"
  assert lock.load("testsave")["addons"]["Zone Pack"]["pending_spawn"]is False
+ZONE_PLAYLIST=('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Zones Only">\n''\t<locations location_id_counter="2">\n\t\t<locations>\n''\t\t\t<l id="1" tile="data/tiles/t.xml" is_env_mod="true">\n''\t\t\t\t<components>\n''\t\t\t\t\t<c component_type="10" id="1">\n''\t\t\t\t\t\t<spawn_transform 30="3010.0" 31="11.5" 32="4020.0"/>\n''\t\t\t\t\t</c>\n''\t\t\t\t</components>\n''\t\t\t</l>\n''\t\t</locations>\n\t</locations>\n</playlist>\n')
+def test_a_zone_only_addon_never_claims_vehicles(sw_root):
+ from swam import geometry
+ d=sw_root/"data"/"missions"/"Zones Only"
+ d.mkdir()
+ (d/"playlist.xml").write_text(ZONE_PLAYLIST)
+ vids,oids,warns=geometry.match_all(GEO_SCENE,"Zones Only",["data/missions/Zones Only"])
+ assert vids==[],"zone spawn points must never claim vehicles standing on them"
+ assert oids==[]
+def test_objects_are_matched_and_despawned_too(sw_root):
+ from swam import geometry
+ d=sw_root/"data"/"missions"/"Prop Pack"
+ d.mkdir()
+ pl=TOWER_PLAYLIST.replace('component_type="3"','component_type="2"').replace("Tower Pack","Prop Pack")
+ (d/"playlist.xml").write_text(pl)
+ scene=('<dynamics object_counter="9">\n''\t<object type="24" id="77" char_steam_id="-1" is_mission="true">\n''\t\t<transform 30="3010.0" 31="11.5" 32="4020.0"/>\n''\t</object>\n''\t<object type="24" id="78" char_steam_id="-1">\n''\t\t<transform 30="3010.0" 31="11.5" 32="4020.0"/>\n''\t</object>\n</dynamics>\n')
+ vids,oids,warns=geometry.match_all(scene,"Prop Pack",["data/missions/Prop Pack"])
+ assert oids==[77],"only the game-attested object is claimed"
+ assert any("not mark it as addon-spawned"in w for w in warns)
