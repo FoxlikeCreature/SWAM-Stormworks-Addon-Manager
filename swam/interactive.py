@@ -1,4 +1,4 @@
-from.import companion,lock,mods,paths,verify
+from.import addons,companion,lock,mods,paths,verify
 from.scene import Scene
 def run(save_name:str,dispatch)->None:
  save=paths.save_dir(save_name)
@@ -15,12 +15,16 @@ def run(save_name:str,dispatch)->None:
   scripted_paths={s["path"]for s in scene.list_scripts()}
   print("addons:")
   for v in scene.list_playlists():
-   if not v.startswith("data/missions/"):
+   if v.startswith("rom/data/missions/"):
     continue
-   name=v.split("/",2)[2]
+   name=addons.playlist_name(v)
+   if name is None:
+    continue
    marks=[]
    if v in scripted_paths:
     marks.append("scripted")
+   if not v.startswith("data/missions/"):
+    marks.append("workshop")
    marks.append("SWAM"if name in managed else"inherited")
    rows.append(("addon",name))
    print(f"  {len(rows):2}. {name} [{', '.join(marks)}]")

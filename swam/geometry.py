@@ -55,21 +55,27 @@ def addon_attested(scene_text:str)->set[int]:
    ok.add(int(m.group(1)))
  return ok
 def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE)->tuple[list[int],list[str]]:
+ from.import addons
  warnings=[]
- target_pl=paths.sw_root()/"data"/"missions"/addon_name/"playlist.xml"
- if not target_pl.is_file():
-  raise SystemExit(f"no playlist.xml for {addon_name} - nothing to match")
- target=playlist_signatures(target_pl)
+ target_dir=None
+ for v in active_playlists:
+  if addons.playlist_name(v)==addon_name:
+   target_dir=addons.playlist_dir(v)
+   break
+ if target_dir is None:
+  local=paths.sw_root()/"data"/"missions"/addon_name
+  if(local/"playlist.xml").is_file():
+   target_dir=local
+ if target_dir is None:
+  raise SystemExit(f"no playlist.xml found for '{addon_name}' - without its files "f"there is nothing to match the structures against")
+ target=playlist_signatures(target_dir/"playlist.xml")
  others:set[tuple]=set()
  for v in active_playlists:
-  if not v.startswith("data/missions/"):
+  if addons.playlist_name(v)==addon_name:
    continue
-  name=v.split("/",2)[2]
-  if name==addon_name:
-   continue
-  pl=paths.sw_root()/v/"playlist.xml"
-  if pl.is_file():
-   others|=playlist_signatures(pl)
+  d=addons.playlist_dir(v)
+  if d is not None:
+   others|=playlist_signatures(d/"playlist.xml")
  contested={t for t in target if any(_dist(t,o)<=tolerance for o in others)}
  if contested:
   warnings.append(f"{len(contested)} signatures are shared with other "f"addons - leaving those structures alone")

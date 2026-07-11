@@ -21,7 +21,10 @@ class Prop:
    return bool(value)
   if self.kind=="text":
    return str(value)
-  v=float(value)
+  try:
+   v=float(value)
+  except(TypeError,ValueError):
+   raise SystemExit(f"'{self.label}' is a slider - it needs a number between "f"{_num(self.minimum)} and {_num(self.maximum)}, "f"not {value!r}")
   if self.step:
    v=self.minimum+round((v-self.minimum)/self.step)*self.step
   v=max(self.minimum,min(self.maximum,v))
@@ -165,27 +168,32 @@ def _trace_table(text,entry_spans,path,variables,props,table_start):
      scale*=float(f)
    p.saved_path=path+(key,)
    p.saved_scale=scale
-def _rewrite_default(text:str,p:Prop,value)->str:
+def _default_edits(text:str,p:Prop,value)->list[tuple]:
  edits=[]
  for call_start,spans,close in p.spans:
   a,b=spans[-1]
   raw=text[a:b]
-  quoted=raw.strip()[:1]in"'\""
+  bare=raw.strip()
+  quoted=bare[:1]in"'\""
   if p.kind=="checkbox":
    new="true"if value else"false"
   elif p.kind=="text":
-   new=str(value).replace('"','\\"')
+   new=str(value).replace("\\","\\\\").replace('"','\\"')
    quoted=True
   else:
    new=_num(value)
   if quoted:
-   q=raw.strip()[0]if raw.strip()[:1]in"'\""else'"'
+   q=bare[0]if bare[:1]in"'\""else'"'
    new=q+new+q
   pad_l=raw[:len(raw)-len(raw.lstrip())]
   edits.append((a,b,pad_l+new))
- for a,b,new in sorted(edits,reverse=True):
+ return edits
+def _apply_edits(text:str,edits:list[tuple])->str:
+ for a,b,new in sorted(edits,key=lambda e:e[0],reverse=True):
   text=text[:a]+new+text[b:]
  return text
+def _rewrite_default(text:str,p:Prop,value)->str:
+ return _apply_edits(text,_default_edits(text,p,value))
 def local_script(addon_name:str)->Path:
  p=paths.sw_root()/"data"/"missions"/addon_name/"script.lua"
  if not p.is_file():
@@ -237,11 +245,12 @@ def apply(save:Path,addon_name:str,scene,changes:dict[str,object])->tuple[list[s
  data=savedata.load_file(sd)if sd and sd.is_file()else None
  stored=0
  applied={}
+ edits=[]
  for label,raw in changes.items():
   p=props[label]
   value=p.clamp(raw)
   applied[label]=value
-  text=_rewrite_default(text,p,value)
+  edits+=_default_edits(text,p,value)
   if data is not None and p.saved_path is not None:
    node=data
    for key in p.saved_path[:-1]:
@@ -254,6 +263,7 @@ def apply(save:Path,addon_name:str,scene,changes:dict[str,object])->tuple[list[s
     stored+=1
     continue
   report.append(f"'{label}': stored addon state not located - the new "f"value takes effect where the addon reads it fresh "f"(fresh installs always do)")
+ text=_apply_edits(text,edits)
  with open(script,"w",encoding="utf-8",newline="")as f:
   f.write(text)
  report.insert(0,f"defaults updated in {script}")

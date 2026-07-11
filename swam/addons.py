@@ -12,6 +12,9 @@ class AddonRef:
   if not m:
    raise SystemExit(f"playlist.xml has no name attribute: {pl}")
   self.name=m.group(1)
+  bad=set(self.name)&set('<>:"/\\|?*')
+  if bad or self.name!=self.name.strip()or self.name.endswith("."):
+   raise SystemExit(f"the addon calls itself {self.name!r}, and that name cannot "f"become a folder under data/missions on Windows (leading or "f"trailing spaces, a trailing dot, or one of <>:\"/\\|?*).\n"f"Rename it in {pl} - both the name attribute and the folder - "f"and add it again")
  @property
  def scripted(self)->bool:
   s=self.disk_path/"script.lua"
@@ -57,6 +60,43 @@ def resolve_addon(ident:str)->AddonRef:
  if(local/"playlist.xml").is_file():
   return AddonRef(local)
  raise SystemExit(f"addon not found: {ident}\n"f"(tried: path, workshop id, name in data/missions)")
+def playlist_dir(value:str)->Path|None:
+ if value.startswith("rom/"):
+  from.import catalog
+  for inst in catalog.game_install_dirs():
+   d=inst/value
+   if(d/"playlist.xml").is_file():
+    return d
+  return None
+ if value.startswith("data/missions/"):
+  d=paths.sw_root()/value
+  return d if(d/"playlist.xml").is_file()else None
+ disk=paths.game_path_to_disk(value)
+ if disk is None:
+  return None
+ return disk if(disk/"playlist.xml").is_file()else None
+def playlist_name(value:str)->str|None:
+ if value.startswith("data/missions/"):
+  return value.split("/",2)[2]
+ d=playlist_dir(value)
+ if d is None:
+  return None
+ pl=d/"playlist.xml"
+ if not pl.is_file():
+  return None
+ m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
+ return m.group(1)if m else None
+def attached_value(scene,addon_name:str)->str|None:
+ direct=f"data/missions/{addon_name}"
+ values=scene.list_playlists()
+ if direct in values:
+  return direct
+ for v in values:
+  if v.startswith("rom/data/missions/"):
+   continue
+  if playlist_name(v)==addon_name:
+   return v
+ return None
 def find_script_entry(scene,addon_name:str,playlist_value:str):
  for s in scene.list_scripts():
   p=s["path"]

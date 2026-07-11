@@ -83,9 +83,8 @@ class Picker(tk.Toplevel):
   items=catalog.addons()if kind=="addon"else catalog.mods()
   self.by_source:dict[str,list[catalog.Item]]={}
   for it in items:
-   if it.source=="local":
-    if(it.name in attached or it.ident in attached or it.name==companion.NAME):
-     continue
+   if it.name in attached or it.ident in attached or it.name==companion.NAME:
+    continue
    self.by_source.setdefault(it.source,[]).append(it)
   bar=ttk.Frame(self,padding=(8,8,8,0))
   bar.pack(fill="x")
@@ -398,16 +397,22 @@ class App(ttk.Frame):
    self.tree.insert("","end",values=("mod",desc,""),tags=("mod",w))
   scripted_paths={s["path"]for s in scene.list_scripts()}
   for v in scene.list_playlists():
-   if v.startswith("data/missions/"):
-    aname=v.split("/",2)[2]
-    if aname==companion.NAME:
-     self.tree.insert("","end",values=("addon",aname,"keeps the journal"),tags=("companion",aname))
-     continue
-    marks=[]
-    if v in scripted_paths:
-     marks.append("scripted")
-    marks.append("installed by SWAM"if aname in managed else"inherited")
-    self.tree.insert("","end",values=("addon",aname,", ".join(marks)),tags=("addon",aname))
+   if v.startswith("rom/data/missions/"):
+    continue
+   aname=addons.playlist_name(v)
+   if aname is None:
+    self.tree.insert("","end",values=("addon",v,"files not found on disk"),tags=("addon",v))
+    continue
+   if aname==companion.NAME:
+    self.tree.insert("","end",values=("addon",aname,"keeps the journal"),tags=("companion",aname))
+    continue
+   marks=[]
+   if v in scripted_paths:
+    marks.append("scripted")
+   if not v.startswith("data/missions/"):
+    marks.append("straight from the workshop")
+   marks.append("installed by SWAM"if aname in managed else"inherited")
+   self.tree.insert("","end",values=("addon",aname,", ".join(marks)),tags=("addon",aname))
   for v in scene.list_playlists():
    if v.startswith("rom/data/missions/"):
     aname=v.rsplit("/",1)[-1]
@@ -626,13 +631,23 @@ class App(ttk.Frame):
   def do_apply():
    changes=[]
    for label,(p,var)in controls.items():
+    cur=p.saved_value if p.saved_value is not None else p.default
     v=var.get()
     if p.kind=="checkbox":
+     if bool(v)==bool(cur):
+      continue
      v="true"if v else"false"
     elif p.kind=="slider":
+     if p.clamp(v)==p.clamp(cur):
+      continue
      v=properties._num(p.clamp(v))
+    elif str(v)==str(cur):
+     continue
     changes.append(f"{label}={v}")
    dlg.destroy()
+   if not changes:
+    self.log_line("settings: nothing changed")
+    return
    def op():
     from.cli import cmd_settings
     cmd_settings(_Args(save=save,addon=aname,set=changes,dry_run=False,no_backup=False))
@@ -653,7 +668,7 @@ class App(ttk.Frame):
   if not save:
    return
   scene=Scene(paths.save_dir(save)/"scene.xml")
-  attached={v.split("/",2)[2]for v in scene.list_playlists()if v.startswith("data/missions/")}
+  attached={n for n in(addons.playlist_name(v)for v in scene.list_playlists()if not v.startswith("rom/"))if n}
   idents=Picker(self.root,"addon",attached).result
   if not idents:
    return

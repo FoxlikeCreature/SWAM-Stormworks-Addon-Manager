@@ -100,7 +100,8 @@ is enough.
 1. **Close Stormworks.** SWAM refuses to touch saves while the game runs
    (your edits would be overwritten), so this is not optional.
 2. Launch SWAM. Pick your save in the dropdown at the top.
-3. You'll see everything attached to that save: mods, addons, and the
+3. You'll see everything attached to that save: mods, addons (including
+   the ones the game attached straight from the workshop folder), and the
    built-in vanilla addons (violet-tinted). Colored rows mean something:
    green = SWAM's companion, amber = an update is available.
 4. **Install the companion** (one button, once per save). It's a tiny

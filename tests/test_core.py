@@ -322,3 +322,42 @@ def test_rapid_backups_never_collide_and_keep_the_newest(sw_root):
  ops=[e["operation"]for e in list_backups("testsave")]
  assert ops.count("pre-restore")==KEEP_PRE_RESTORE
  assert len([o for o in ops if o!="pre-restore"])==KEEP_BACKUPS
+def test_changing_several_settings_at_once_keeps_the_script_valid(sw_root):
+ from swam import properties
+ src=('a = property.slider("Alpha", 1, 60, 1, 15)\n''b = property.checkbox("Beta", "false")\n''c = property.slider("Gamma", 0, 100, 5, 50)\n')
+ d=sw_root/"data"/"missions"/"Multi Pack"
+ d.mkdir()
+ (d/"playlist.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Multi Pack">\n''\t<locations location_id_counter="1">\n\t\t<locations/>\n''\t</locations>\n</playlist>\n')
+ (d/"script.lua").write_text(src)
+ run_cli("add-addon","testsave","Multi Pack","--no-backup")
+ run_cli("settings","testsave","Multi Pack","--no-backup","--set","Alpha=5","--set","Beta=on","--set","Gamma=25")
+ text=(d/"script.lua").read_text()
+ assert'property.slider("Alpha", 1, 60, 1, 5)'in text
+ assert'property.checkbox("Beta", "true")'in text
+ assert'property.slider("Gamma", 0, 100, 5, 25)'in text
+ assert len({p.label for p in properties.parse_schema(text)})==3
+def test_slider_refuses_nonsense_values(sw_root):
+ run_cli("add-addon","testsave","Tuned Pack","--no-backup")
+ with pytest.raises(SystemExit,match="needs a number"):
+  run_cli("settings","testsave","Tuned Pack","--no-backup","--set","Wave Interval (Mins)=soon")
+def test_addon_names_hostile_to_windows_are_refused(sw_root):
+ d=sw_root/"data"/"missions"/"Trailing Space"
+ d.mkdir()
+ (d/"playlist.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Trailing Space ">\n''</playlist>\n')
+ with pytest.raises(SystemExit,match="cannot become a folder"):
+  run_cli("add-addon","testsave","Trailing Space","--no-backup")
+def test_workshop_attached_addon_is_visible_and_removable(sw_root,tmp_path):
+ from swam import addons,paths
+ from swam.scene import Scene
+ ws=tmp_path/"ws"/"424242"/"playlist"
+ ws.mkdir(parents=True)
+ (ws/"playlist.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="3" name="Straight From Workshop">\n''\t<locations location_id_counter="1">\n\t\t<locations/>\n''\t</locations>\n</playlist>\n')
+ value=paths.game_path_string(ws)
+ scene=Scene(paths.save_dir("testsave")/"scene.xml")
+ scene.add_playlist(value)
+ scene.write()
+ scene=Scene(paths.save_dir("testsave")/"scene.xml")
+ assert addons.playlist_name(value)=="Straight From Workshop"
+ assert addons.attached_value(scene,"Straight From Workshop")==value
+ run_cli("remove-addon","testsave","Straight From Workshop","--force","--no-backup")
+ assert value not in read_scene(sw_root)

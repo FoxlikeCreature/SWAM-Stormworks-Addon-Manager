@@ -56,10 +56,14 @@ def list_backups(save_name:str)->list[dict]:
  return out
 def restore_backup(save_path:Path,backup:Path)->None:
  tmp=save_path.with_name(save_path.name+".swam-broken")
+ if tmp.exists():
+  shutil.rmtree(tmp)
  save_path.rename(tmp)
  try:
   shutil.copytree(backup,save_path)
  except BaseException:
+  if save_path.exists():
+   shutil.rmtree(save_path,ignore_errors=True)
   if not save_path.exists():
    tmp.rename(save_path)
   raise

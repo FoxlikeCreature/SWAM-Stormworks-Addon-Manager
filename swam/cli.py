@@ -88,9 +88,9 @@ def cmd_remove_addon(args):
  name=args.addon
  if name==companion.NAME:
   raise SystemExit("You really shouldn't do that.\n\n""The companion is the one holding the cleanup journal - deleting ""the janitor along with his notebook is the single job he cannot ""do. If you truly want it gone: swam uninstall-companion")
- value=f"data/missions/{name}"
- if value not in scene.list_playlists():
-  raise SystemExit(f"addon '{name}' is not attached to this save "f"(expected entry {value})")
+ value=addons.attached_value(scene,name)
+ if value is None:
+  raise SystemExit(f"addon '{name}' is not attached to this save")
  scripted,script_path=addons.find_script_entry(scene,name,value)
  managed=name in lk["addons"]
  if not managed and not args.force:
