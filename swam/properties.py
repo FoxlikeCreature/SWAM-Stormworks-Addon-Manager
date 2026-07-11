@@ -263,11 +263,16 @@ def apply(save:Path,addon_name:str,scene,changes:dict[str,object])->tuple[list[s
     stored+=1
     continue
   report.append(f"'{label}': stored addon state not located - the new "f"value takes effect where the addon reads it fresh "f"(fresh installs always do)")
+ original=script.read_bytes()
  text=_apply_edits(text,edits)
- with open(script,"w",encoding="utf-8",newline="")as f:
-  f.write(text)
- report.insert(0,f"defaults updated in {script}")
- if stored and data is not None:
-  savedata.save_file(sd,data)
-  report.insert(1,f"{stored} value(s) updated in this save's state "f"({sd.name})")
+ try:
+  with open(script,"w",encoding="utf-8",newline="")as f:
+   f.write(text)
+  report.insert(0,f"defaults updated in {script}")
+  if stored and data is not None:
+   savedata.save_file(sd,data)
+   report.insert(1,f"{stored} value(s) updated in this save's state "f"({sd.name})")
+ except BaseException:
+  script.write_bytes(original)
+  raise
  return report,applied

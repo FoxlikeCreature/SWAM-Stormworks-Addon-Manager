@@ -83,7 +83,9 @@ class Picker(tk.Toplevel):
   items=catalog.addons()if kind=="addon"else catalog.mods()
   self.by_source:dict[str,list[catalog.Item]]={}
   for it in items:
-   if it.name in attached or it.ident in attached or it.name==companion.NAME:
+   if it.name==companion.NAME:
+    continue
+   if it.source=="local"and(it.name in attached or it.ident in attached):
     continue
    self.by_source.setdefault(it.source,[]).append(it)
   bar=ttk.Frame(self,padding=(8,8,8,0))

@@ -37,10 +37,15 @@ class Scene:
    close="\t\t</active_mods>"
    self._find_once(close,"closing </active_mods>")
    self.text=self.text.replace(close,entry+close,1)
+ def _collapse_if_empty(self,tag:str)->None:
+  m=re.search(rf"<{tag}>\s*</{tag}>",self.text)
+  if m:
+   self.text=self.text[:m.start()]+f"<{tag}/>"+self.text[m.end():]
  def remove_mod(self,wine_path:str)->None:
   entry=f'\t\t\t<mod_path value="{wine_path}"/>\n'
   idx=self._find_once(entry,f"mod entry {wine_path}")
   self.text=self.text[:idx]+self.text[idx+len(entry):]
+  self._collapse_if_empty("active_mods")
  def list_playlists(self)->list[str]:
   m=re.search(r"<active_playlists>.*?</active_playlists>",self.text,re.S)
   if not m:
@@ -87,11 +92,11 @@ class Scene:
   return sid
  def verify(self)->None:
   for tag in("active_mods","active_playlists","scripts","game_data","scene"):
-   opens=len(re.findall(rf"<{tag}[ >]",self.text))
-   selfclosed=len(re.findall(rf"<{tag}[^>]*/>",self.text))
+   tags=re.findall(rf"<{tag}(?:\s[^>]*?)?(/?)>",self.text)
+   opens=len([t for t in tags if t!="/"])
    closes=self.text.count(f"</{tag}>")
-   if opens-selfclosed!=closes:
-    raise SceneError(f"unbalanced <{tag}> tags: "f"{opens-selfclosed} opened, {closes} closed")
+   if opens!=closes:
+    raise SceneError(f"unbalanced <{tag}> tags: "f"{opens} opened, {closes} closed")
  def write(self)->None:
   self.verify()
   tmp=self.path.with_suffix(".xml.swam-tmp")

@@ -19,10 +19,14 @@ def _mod_name(mx:Path)->str|None:
  m=re.search(r'<mod name="([^"]*)"',mx.read_text(errors="replace"))
  return m.group(1)if m else None
 def _find_preview(folder:Path)->Path|None:
- for cand in("workshop_preview.png","mod.png","preview.png","thumbnail.png"):
-  p=folder/cand
-  if p.is_file():
-   return p
+ wanted=("workshop_preview.png","mod.png","preview.png","thumbnail.png")
+ try:
+  by_name={f.name.lower():f for f in folder.iterdir()if f.is_file()}
+ except OSError:
+  return None
+ for cand in wanted:
+  if cand in by_name:
+   return by_name[cand]
  return None
 def game_install_dirs()->list[Path]:
  out=[]

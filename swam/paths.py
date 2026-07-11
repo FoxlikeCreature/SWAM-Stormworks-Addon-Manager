@@ -5,6 +5,9 @@ from pathlib import Path
 APP_ID=573090
 IS_WINDOWS=sys.platform=="win32"
 def _swam_data_dir()->Path:
+ env=os.environ.get("SWAM_DATA_DIR")
+ if env:
+  return Path(env).expanduser()
  if IS_WINDOWS:
   base=os.environ.get("LOCALAPPDATA")
   if base:

@@ -91,6 +91,8 @@ def attached_value(scene,addon_name:str)->str|None:
  values=scene.list_playlists()
  if direct in values:
   return direct
+ if addon_name in values:
+  return addon_name
  for v in values:
   if v.startswith("rom/data/missions/"):
    continue

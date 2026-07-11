@@ -6,6 +6,20 @@ local function ensure(t, k, default)
 if t[k] == nil then t[k] = default end
 return t[k]
 end
+local function count(t)
+local n = 0
+if type(t) == "table" then
+for _ in pairs(t) do n = n + 1 end
+end
+return n
+end
+local function next_index(t)
+local max = 0
+for k in pairs(t) do
+if type(k) == "number" and k > max then max = k end
+end
+return max + 1
+end
 local function init_savedata()
 if type(g_savedata) ~= "table" then g_savedata = {} end
 ensure(g_savedata, "journal", {})
@@ -27,14 +41,14 @@ local aname = adata and adata.name or ("index_" .. tostring(addon_index))
 local rec = ensure(g_savedata.journal, aname, {})
 local kind = (type_string == "vehicle") and "v" or "o"
 local list = ensure(rec, kind, {})
-list[#list + 1] = id
+list[next_index(list)] = id
 end
 function onVehicleDespawn(vehicle_id, peer_id)
 if type(g_savedata) ~= "table" or g_savedata.journal == nil then return end
 for _, rec in pairs(g_savedata.journal) do
 if rec.v then
-for i = #rec.v, 1, -1 do
-if rec.v[i] == vehicle_id then table.remove(rec.v, i) end
+for i, id in pairs(rec.v) do
+if id == vehicle_id then rec.v[i] = nil end
 end
 end
 end
@@ -80,11 +94,11 @@ init_savedata()
 local ns = {}
 for n in pairs(g_savedata.tasks) do ns[#ns + 1] = n end
 table.sort(ns)
-local count = 0
+local ran = 0
 for _, n in ipairs(ns) do
 local task = g_savedata.tasks[n]
 if g_savedata.report[n] == nil then
-count = count + 1
+ran = ran + 1
 if task.action == "spawn_env" then
 report(n, do_spawn_env(task))
 elseif task.action == "despawn" then
@@ -94,8 +108,8 @@ report(n, "unknown task: " .. tostring(task.action))
 end
 end
 end
-if count > 0 then
-server.announce("[SWAM]", "tasks done: " .. count .. ". SAVE the game to persist")
+if ran > 0 then
+server.announce("[SWAM]", "tasks done: " .. ran .. ". SAVE the game to persist")
 end
 end
 local function prune_tasks()
@@ -117,19 +131,19 @@ local function clean_journal()
 local removed = 0
 for _, rec in pairs(g_savedata.journal) do
 if rec.o then
-for i = #rec.o, 1, -1 do
-local _, ok = server.getObjectPos(rec.o[i])
+for i, id in pairs(rec.o) do
+local _, ok = server.getObjectPos(id)
 if not ok then
-table.remove(rec.o, i)
+rec.o[i] = nil
 removed = removed + 1
 end
 end
 end
 if rec.v then
-for i = #rec.v, 1, -1 do
-local _, ok = server.getVehiclePos(rec.v[i])
+for i, id in pairs(rec.v) do
+local _, ok = server.getVehiclePos(id)
 if not ok then
-table.remove(rec.v, i)
+rec.v[i] = nil
 removed = removed + 1
 end
 end
@@ -164,10 +178,10 @@ server.announce("[SWAM]", "could not read your position", peer_id)
 return
 end
 local marks = ensure(g_savedata, "marks", {})
-marks[#marks + 1] = { x = m[13], y = m[14], z = m[15] }
+marks[next_index(marks)] = { x = m[13], y = m[14], z = m[15] }
 server.announce("[SWAM]", "marked (" .. math.floor(m[13]) .. ", " ..
 math.floor(m[14]) .. ", " .. math.floor(m[15]) .. ") - " ..
-#marks .. " mark(s) total. SAVE the game, then close it and use " ..
+count(marks) .. " mark(s) total. SAVE the game, then close it and use " ..
 "SWAM remove-marked", peer_id)
 return
 end
@@ -176,18 +190,11 @@ g_savedata.marks = {}
 server.announce("[SWAM]", "marks cleared. SAVE the game", peer_id)
 return
 end
-local n_addons = 0
-for _ in pairs(g_savedata.journal) do n_addons = n_addons + 1 end
-local n_tasks, n_done = 0, 0
-for _ in pairs(g_savedata.tasks) do n_tasks = n_tasks + 1 end
-for _ in pairs(g_savedata.report) do n_done = n_done + 1 end
-local n_marks = 0
-if g_savedata.marks then for _ in pairs(g_savedata.marks) do n_marks = n_marks + 1 end end
-server.announce("[SWAM]", "journal: " .. n_addons .. " addons; tasks: " ..
-n_done .. "/" .. n_tasks .. "; marks: " .. n_marks, peer_id)
+server.announce("[SWAM]", "journal: " .. count(g_savedata.journal) ..
+" addons; tasks: " .. count(g_savedata.report) .. "/" ..
+count(g_savedata.tasks) .. "; marks: " .. count(g_savedata.marks), peer_id)
 for name, rec in pairs(g_savedata.journal) do
-local nv = rec.v and #rec.v or 0
-local no = rec.o and #rec.o or 0
-server.announce("[SWAM]", "  " .. name .. ": vehicles " .. nv .. ", objects " .. no, peer_id)
+server.announce("[SWAM]", "  " .. name .. ": vehicles " .. count(rec.v) ..
+", objects " .. count(rec.o), peer_id)
 end
 end

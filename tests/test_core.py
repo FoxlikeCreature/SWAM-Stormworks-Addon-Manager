@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from pathlib import Path
 import pytest
@@ -361,3 +362,30 @@ def test_workshop_attached_addon_is_visible_and_removable(sw_root,tmp_path):
  assert addons.attached_value(scene,"Straight From Workshop")==value
  run_cli("remove-addon","testsave","Straight From Workshop","--force","--no-backup")
  assert value not in read_scene(sw_root)
+def test_save_without_mods_can_still_be_edited(sw_root):
+ scene_path=sw_root/"saves"/"testsave"/"scene.xml"
+ with open(scene_path,encoding="utf-8",newline="")as f:
+  text=f.read()
+ empty=re.sub(r"<active_mods>.*?</active_mods>","<active_mods/>",text,flags=re.S)
+ with open(scene_path,"w",encoding="utf-8",newline="")as f:
+  f.write(empty)
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ assert'<playlist_name value="data/missions/Zone Pack"/>'in read_scene(sw_root)
+ run_cli("add-mod","testsave","222","--no-backup")
+ run_cli("remove-mod","testsave","222","--no-backup")
+ assert"<active_mods/>"in read_scene(sw_root),"an emptied block must collapse back"
+ run_cli("remove-addon","testsave","Zone Pack","--no-backup")
+ assert read_scene(sw_root)==empty
+def test_adding_the_same_addon_twice_is_refused(sw_root):
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ with pytest.raises(SystemExit,match="already attached"):
+  run_cli("add-addon","testsave","Zone Pack","--no-backup")
+def test_verify_notices_a_missing_workshop_playlist(sw_root,tmp_path):
+ from swam import paths,verify
+ from swam.scene import Scene
+ gone=paths.game_path_string(tmp_path/"ws"/"9999"/"playlist")
+ scene=Scene(paths.save_dir("testsave")/"scene.xml")
+ scene.add_playlist(gone)
+ scene.write()
+ problems=verify.run(paths.save_dir("testsave"))
+ assert any("playlist missing on disk"in p for p in problems)

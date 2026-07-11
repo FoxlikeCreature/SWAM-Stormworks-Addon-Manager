@@ -19,10 +19,12 @@ def run(save_path:Path)->list[str]:
    problems.append(f"addon from <s> is missing on disk: {s['path']}")
   if s["path"]not in playlists:
    problems.append(f"addon in <s> but not in active_playlists: {s['path']}")
+ from.import addons
  for v in playlists:
-  if v.startswith("data/missions/"):
-   if not(paths.sw_root()/v/"playlist.xml").is_file():
-    problems.append(f"playlist missing on disk: {v}")
+  if v.startswith("rom/"):
+   continue
+  if addons.playlist_dir(v)is None:
+   problems.append(f"playlist missing on disk: {v}")
  ids={s["script_id"]for s in scripts}
  sd=save_path/"script_data"
  if sd.is_dir():

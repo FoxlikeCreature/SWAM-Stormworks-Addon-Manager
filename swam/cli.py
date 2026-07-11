@@ -56,6 +56,9 @@ def cmd_add_addon(args):
   if risk:
    print(f"WARNING: {risk}")
  scene=Scene(save/"scene.xml")
+ already=addons.attached_value(scene,ref.name)
+ if already is not None:
+  raise SystemExit(f"'{ref.name}' is already attached to this save (as "f"{already}) - adding it again would give the game two "f"copies of the same addon")
  scene.add_playlist(ref.playlist_value)
  new_sid=scene.add_script(ref.playlist_value)if ref.scripted else None
  if args.dry_run:
