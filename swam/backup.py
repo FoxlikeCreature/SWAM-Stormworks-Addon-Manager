@@ -9,13 +9,17 @@ def backups_root(save_name:str)->Path:
  return paths.SWAM_DATA/"backups"/save_name
 def make_backup(save_path:Path,operation:str,keep:Path|None=None)->Path:
  ts=time.strftime("%Y%m%d-%H%M%S")
- dest=backups_root(save_path.name)/ts
- dest.parent.mkdir(parents=True,exist_ok=True)
- if dest.exists():
-  dest=dest.with_name(dest.name+"-"+str(time.time_ns()%1000))
+ root=backups_root(save_path.name)
+ root.mkdir(parents=True,exist_ok=True)
+ used=[d.name for d in root.iterdir()if d.is_dir()and d.name.startswith(ts)]
+ if not used:
+  dest=root/ts
+ else:
+  taken={int(n.split("-")[2])for n in used if n.count("-")==2 and n.split("-")[2].isdigit()}
+  dest=root/f"{ts}-{max(taken,default=0)+1:03d}"
  shutil.copytree(save_path,dest)
- (dest.parent/f"{dest.name}.meta.json").write_text(json.dumps({"operation":operation,"save":str(save_path),"time":ts},ensure_ascii=False,indent=1))
- _prune(dest.parent,keep)
+ (root/f"{dest.name}.meta.json").write_text(json.dumps({"operation":operation,"save":str(save_path),"time":dest.name},ensure_ascii=False,indent=1))
+ _prune(root,keep)
  return dest
 def _operation_of(root:Path,name:str)->str:
  meta=root/f"{name}.meta.json"
@@ -25,8 +29,10 @@ def _operation_of(root:Path,name:str)->str:
   except(OSError,ValueError):
    pass
  return"?"
+def _sorted_dirs(root:Path)->list[Path]:
+ return sorted((d for d in root.iterdir()if d.is_dir()),key=lambda d:d.name)
 def _prune(root:Path,keep:Path|None=None)->None:
- dirs=sorted(d for d in root.iterdir()if d.is_dir())
+ dirs=_sorted_dirs(root)
  protected={keep.resolve()}if keep else set()
  groups:dict[bool,list[Path]]={True:[],False:[]}
  for d in dirs:
@@ -45,7 +51,7 @@ def list_backups(save_name:str)->list[dict]:
  root=backups_root(save_name)
  out=[]
  if root.is_dir():
-  for d in sorted((d for d in root.iterdir()if d.is_dir()),reverse=True):
+  for d in reversed(_sorted_dirs(root)):
    out.append({"path":d,"time":d.name,"operation":_operation_of(root,d.name)})
  return out
 def restore_backup(save_path:Path,backup:Path)->None:

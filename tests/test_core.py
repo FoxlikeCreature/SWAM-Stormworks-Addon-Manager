@@ -309,3 +309,16 @@ def test_workshop_installed_companion_can_be_uninstalled(sw_root,tmp_path):
  text=read_scene(sw_root)
  assert game_path not in text
  assert not companion.is_installed(Scene(paths.save_dir("testsave")/"scene.xml"))
+def test_rapid_backups_never_collide_and_keep_the_newest(sw_root):
+ from swam.backup import KEEP_BACKUPS,KEEP_PRE_RESTORE,list_backups,make_backup
+ from swam import paths
+ save=paths.save_dir("testsave")
+ for i in range(KEEP_BACKUPS+4):
+  make_backup(save,f"op{i}")
+ kept=[e["operation"]for e in list_backups("testsave")]
+ assert kept==[f"op{i}"for i in range(KEEP_BACKUPS+3,KEEP_BACKUPS-2,-1)]
+ for _ in range(KEEP_PRE_RESTORE+1):
+  make_backup(save,"pre-restore")
+ ops=[e["operation"]for e in list_backups("testsave")]
+ assert ops.count("pre-restore")==KEEP_PRE_RESTORE
+ assert len([o for o in ops if o!="pre-restore"])==KEEP_BACKUPS
