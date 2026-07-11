@@ -103,20 +103,65 @@ def restore_backup(save_path:Path,backup:Path)->None:
   raise
  _restore_lock(save_path.name,backup)
  shutil.rmtree(tmp)
+def _busy_path(save_name:str)->Path:
+ return paths.SWAM_DATA/"locks"/f"{save_name}.busy"
+def _alive(pid:int)->bool:
+ import os
+ if pid<=0:
+  return False
+ try:
+  os.kill(pid,0)
+ except ProcessLookupError:
+  return False
+ except PermissionError:
+  return True
+ except OSError:
+  return True
+ return True
+def acquire(save_name:str)->Path:
+ import os
+ p=_busy_path(save_name)
+ p.parent.mkdir(parents=True,exist_ok=True)
+ try:
+  fd=os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
+ except FileExistsError:
+  try:
+   holder=int(p.read_text().strip()or 0)
+  except(OSError,ValueError):
+   holder=0
+  if _alive(holder)and holder!=os.getpid():
+   raise SystemExit(f"another SWAM operation is working on '{save_name}' "f"(process {holder}). Wait for it to finish, or delete "f"{p} if that process is long gone")
+  p.unlink(missing_ok=True)
+  fd=os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
+ with os.fdopen(fd,"w")as f:
+  f.write(str(os.getpid()))
+ return p
+def release(p:Path)->None:
+ p.unlink(missing_ok=True)
 class Transaction:
  def __init__(self,save_path:Path,operation:str,enabled:bool=True):
   self.save_path=save_path
   self.operation=operation
   self.enabled=enabled
   self.backup:Path|None=None
+  self.busy:Path|None=None
  def __enter__(self):
   from.guard import ensure_game_closed
   ensure_game_closed()
-  if self.enabled:
-   self.backup=make_backup(self.save_path,self.operation)
+  self.busy=acquire(self.save_path.name)
+  try:
+   if self.enabled:
+    self.backup=make_backup(self.save_path,self.operation)
+  except BaseException:
+   release(self.busy)
+   raise
   return self
  def __exit__(self,exc_type,exc,tb):
-  if exc_type is not None and self.backup is not None:
-   restore_backup(self.save_path,self.backup)
-   print(f"error - save restored from backup {self.backup}")
+  try:
+   if exc_type is not None and self.backup is not None:
+    restore_backup(self.save_path,self.backup)
+    print(f"error - save restored from backup {self.backup}")
+  finally:
+   if self.busy is not None:
+    release(self.busy)
   return False

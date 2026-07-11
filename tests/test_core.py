@@ -528,3 +528,19 @@ def test_half_written_backups_are_never_offered(sw_root):
  (half/"scene.xml").write_text("truncated")
  offered=[e["time"]for e in backup.list_backups("testsave")]
  assert offered==[good.name],"a backup without its meta file is not a backup"
+def test_two_swam_operations_cannot_overlap(sw_root):
+ from swam import backup
+ held=backup.acquire("testsave")
+ with pytest.raises(SystemExit,match="another SWAM operation"):
+  run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ backup.release(held)
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ assert'data/missions/Zone Pack'in read_scene(sw_root)
+ assert not list((backup.paths.SWAM_DATA/"locks").glob("*.busy")),"the lock is released afterwards"
+def test_a_stale_lock_from_a_dead_process_is_taken_over(sw_root):
+ from swam import backup
+ p=backup._busy_path("testsave")
+ p.parent.mkdir(parents=True,exist_ok=True)
+ p.write_text("999999")
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ assert'data/missions/Zone Pack'in read_scene(sw_root)
