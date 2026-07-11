@@ -61,7 +61,7 @@ class Scene:
   tail=self.text[self.text.rfind("<scripts>"):]
   out=[]
   for m in re.finditer(r'<s (?:script_id="(\d+)" )?store="(\d+)" path="([^"]+)"/>',tail):
-   out.append({"script_id":int(m.group(1)or 0),"store":int(m.group(2)),"path":m.group(3)})
+   out.append({"script_id":int(m.group(1))if m.group(1)is not None else 0,"has_id":m.group(1)is not None,"store":int(m.group(2)),"path":m.group(3)})
   return out
  def next_script_id(self)->int:
   scripts=self.list_scripts()
@@ -80,7 +80,7 @@ class Scene:
   if not recs:
    raise SceneError(f"script not found: {path}")
   sid=recs[0]["script_id"]
-  id_attr=f'script_id="{sid}" 'if sid else""
+  id_attr=f'script_id="{sid}" 'if recs[0]["has_id"]else""
   entry=(f'\t\t\t<s {id_attr}store="{recs[0]["store"]}" 'f'path="{path}"/>\n')
   idx=self._find_once(entry,f"<s> entry {path}")
   self.text=self.text[:idx]+self.text[idx+len(entry):]

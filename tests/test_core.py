@@ -130,7 +130,7 @@ def test_settings_schema_and_full_apply_cycle(sw_root):
  rec=lock.load("testsave")["addons"]["Tuned Pack"]
  assert rec["settings"]["Wave Interval (Mins)"]==60
  assert rec["settings"]["Loud Mode"]is True
- assert rec["source_digest"]
+ assert rec["source"]=="local"and rec["world_digest"]
 GEO_SCENE="""
 <vehicles>
 \t<vehicle id="50" vehicle_group_id="7" is_mission="true" is_static="true">
@@ -240,21 +240,72 @@ def test_companion_found_when_subscribed_from_workshop(sw_root,tmp_path):
  scene.add_script(game_path,store=3)
  assert companion.script_id(scene)is not None
  assert companion.is_installed(scene)
+def companion_data(sw_root):
+ from swam import savedata
+ return savedata.load_file(sw_root/"saves"/"testsave"/"script_data"/"1.xml")
 def test_upgrade_from_edited_local_copy(sw_root):
  run_cli("install-companion","testsave","--no-backup")
  run_cli("add-addon","testsave","Zone Pack","--no-backup")
- from swam import addons,lock,savedata
+ from swam import addons,lock
  rec=lock.load("testsave")["addons"]["Zone Pack"]
- assert not addons.local_playlist_changed(rec,"Zone Pack")
+ assert rec["source"]=="local"
+ assert not addons.local_changed(rec,"Zone Pack")
  pl=sw_root/"data"/"missions"/"Zone Pack"/"playlist.xml"
  pl.write_text(pl.read_text().replace('location_id_counter="1"','location_id_counter="2"'))
- assert addons.local_playlist_changed(rec,"Zone Pack")
+ assert addons.local_changed(rec,"Zone Pack")
  run_cli("upgrade-addon","testsave","Zone Pack","--no-backup")
- data=savedata.load_file(sw_root/"saves"/"testsave"/"script_data"/"1.xml")
- acts=[t["action"]for t in data["tasks"].values()]
- assert acts.count("spawn_env")==2
  rec=lock.load("testsave")["addons"]["Zone Pack"]
- assert not addons.local_playlist_changed(rec,"Zone Pack")
+ assert not addons.local_changed(rec,"Zone Pack")
+ tasks=companion_data(sw_root)["tasks"]
+ assert[t["action"]for t in tasks.values()]==["spawn_env"]
  run_cli("upgrade-addon","testsave","Zone Pack","--local","--no-backup")
- data2=savedata.load_file(sw_root/"saves"/"testsave"/"script_data"/"1.xml")
- assert len(data2["tasks"])==len(data["tasks"])
+ assert len(companion_data(sw_root)["tasks"])==1
+def test_local_edits_are_detected_beyond_the_playlist(sw_root):
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ from swam import addons,lock
+ rec=lock.load("testsave")["addons"]["Zone Pack"]
+ (sw_root/"data"/"missions"/"Zone Pack"/"vehicle_1.xml").write_text("<vehicle/>")
+ assert addons.local_changed(rec,"Zone Pack")
+def test_script_edits_alone_are_not_an_upgrade(sw_root):
+ run_cli("install-companion","testsave","--no-backup")
+ run_cli("add-addon","testsave","Logic Pack","--no-backup")
+ from swam import addons,lock
+ s=sw_root/"data"/"missions"/"Logic Pack"/"script.lua"
+ s.write_text("x = 2\n")
+ rec=lock.load("testsave")["addons"]["Logic Pack"]
+ assert not addons.local_changed(rec,"Logic Pack")
+def test_pending_spawn_is_cancelled_when_the_addon_is_removed(sw_root):
+ run_cli("install-companion","testsave","--no-backup")
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ assert len(companion_data(sw_root)["tasks"])==1
+ run_cli("remove-addon","testsave","Zone Pack","--no-backup")
+ assert companion_data(sw_root)["tasks"]=={}
+def test_restore_never_prunes_the_backup_it_restores_from(sw_root):
+ from swam.backup import KEEP_BACKUPS,list_backups,make_backup
+ from swam import paths
+ save=paths.save_dir("testsave")
+ for i in range(KEEP_BACKUPS):
+  make_backup(save,f"filler {i}")
+ entries=list_backups("testsave")
+ assert len(entries)==KEEP_BACKUPS
+ target=entries[-1]
+ run_cli("restore","testsave",target["time"])
+ assert target["path"].is_dir(),"the backup being restored was pruned"
+ ops=[e["operation"]for e in list_backups("testsave")]
+ assert"pre-restore"in ops
+ assert target["time"]in[e["time"]for e in list_backups("testsave")]
+def test_workshop_installed_companion_can_be_uninstalled(sw_root,tmp_path):
+ from swam import companion,paths
+ from swam.scene import Scene
+ ws=tmp_path/"ws"/"777"/"playlist"
+ ws.mkdir(parents=True)
+ (ws/"playlist.xml").write_text('<playlist path_id="x" folder_path="x" file_store="3" ''name="SWAM Companion">\n</playlist>\n')
+ game_path=paths.game_path_string(ws)
+ scene=Scene(paths.save_dir("testsave")/"scene.xml")
+ scene.add_playlist(game_path)
+ scene.add_script(game_path,store=3)
+ scene.write()
+ run_cli("uninstall-companion","testsave","--really","--no-backup")
+ text=read_scene(sw_root)
+ assert game_path not in text
+ assert not companion.is_installed(Scene(paths.save_dir("testsave")/"scene.xml"))

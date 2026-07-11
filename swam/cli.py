@@ -66,9 +66,10 @@ def cmd_add_addon(args):
   dest=addons.install_files(ref)
   scene.write()
   lk=lock.load(save.name)
-  rec=lock.addon_record(ref.name,ref.playlist_value,ref.scripted,lock.file_hash(dest/"playlist.xml"))
+  rec=lock.addon_record(ref.name,ref.playlist_value,ref.scripted,lock.file_hash(dest/"playlist.xml"),source=ref.source,world_digest=addons.world_digest(dest))
   rec["script_id"]=new_sid
-  rec["source_digest"]=addons.dir_digest(ref.disk_path)
+  if ref.source=="workshop":
+   rec["source_digest"]=addons.dir_digest(ref.disk_path)
   lk["addons"][ref.name]=rec
   lock.store(save.name,lk)
   sid=companion.script_id(scene)
@@ -131,6 +132,10 @@ def cmd_remove_addon(args):
    if vehicles or objects:
     companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":vehicles,"objects":objects})
     print(f"companion task queued: remove {len(vehicles)} "f"vehicles and {len(objects)} objects on next world "f"load (save the game afterwards)")
+   else:
+    dropped=companion.cancel_pending(save,sid,name)
+    if dropped:
+     print(f"cancelled {dropped} queued task(s) for this addon - the ""game never ran them, so nothing was spawned")
  if tx.backup:
   print(f"backup: {tx.backup}")
  print("done. The data/missions folder is untouched - other saves may ""use it")
@@ -154,6 +159,7 @@ def cmd_install_companion(args):
 def cmd_upgrade_addon(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
+ addons.backfill(save.name)
  lk=lock.load(save.name)
  name=args.addon
  if name not in lk["addons"]:
@@ -162,13 +168,18 @@ def cmd_upgrade_addon(args):
  local_dir=paths.sw_root()/"data"/"missions"/name
  if not(local_dir/"playlist.xml").is_file():
   raise SystemExit(f"{local_dir} has no playlist.xml - the addon's local "f"files are gone, nothing to work from")
- src=None if args.local else addons.find_workshop_source(name)
- local_changed=addons.local_playlist_changed(rec,name)
- from_workshop=src is not None and addons.update_available(rec,name)
- if from_workshop and local_changed and not args.discard_local:
+ src=addons.workshop_source(rec,name)
+ local_changed=addons.local_changed(rec,name)
+ ws_update=src is not None and addons.update_available(rec,name)
+ if args.local and args.discard_local:
+  raise SystemExit("--local and --discard-local mean opposite things - pick one")
+ if args.discard_local and src is None:
+  raise SystemExit(f"'{name}' has no workshop source to fall back to "f"(it was installed from local files)")
+ from_workshop=bool(src)and not args.local and(ws_update or args.discard_local)
+ if ws_update and local_changed and not(args.local or args.discard_local):
   raise SystemExit(f"the local copy of '{name}' has manual edits AND the "f"workshop has a newer version. Pick one:\n"f"  --local          keep your edits, refresh the save from them\n"f"  --discard-local  replace the local copy with the workshop version")
  if not from_workshop and not local_changed:
-  print("already up to date (script.lua edits in data/missions apply on ""every load by themselves - only playlist.xml changes need an ""upgrade)")
+  print("already up to date (script.lua edits in data/missions apply on ""every load by themselves - only playlist and location files need ""an upgrade)")
   return
  if from_workshop and src.name!=name:
   raise SystemExit(f"the workshop version renamed the addon to "f"'{src.name}' - that changes save entries; "f"remove and re-add instead")
@@ -177,30 +188,45 @@ def cmd_upgrade_addon(args):
   raise SystemExit("the companion is required for upgrades ""(swam install-companion)")
  source_desc=str(src.disk_path)if from_workshop else f"local edits in {local_dir}"
  if args.dry_run:
-  steps="despawn old structures -> replace files -> respawn"if from_workshop else"despawn old structures -> respawn from the edited playlist"
+  steps="despawn old structures -> replace files -> respawn"if from_workshop else"despawn old structures -> respawn from the edited local files"
   print(f"would upgrade '{name}' from {source_desc}\n({steps})")
   return
  import shutil
+ stash=None
  with Transaction(save,f"upgrade-addon {name}",enabled=not args.no_backup)as tx:
-  jr=companion.journal(save,sid).get(name,{})
-  vehicles,objects=jr.get("v",{}),jr.get("o",{})
-  if vehicles or objects:
-   companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":vehicles,"objects":objects})
-  if from_workshop:
-   shutil.rmtree(local_dir)
-   shutil.copytree(src.disk_path,local_dir)
-  companion.queue_task(save,sid,{"action":"spawn_env","addon":name})
-  if from_workshop:
-   settings=rec.get("settings")or{}
-   if settings:
-    try:
-     report,applied=properties.apply(save,name,scene,settings)
-     print(f"re-applied {len(applied)} saved setting(s)")
-    except SystemExit as e:
-     print(f"could not re-apply saved settings: {e}")
-   rec["source_digest"]=addons.dir_digest(src.disk_path)
-  rec["playlist_hash"]=lock.file_hash(local_dir/"playlist.xml")
-  lock.store(save.name,lk)
+  try:
+   jr=companion.journal(save,sid).get(name,{})
+   vehicles,objects=jr.get("v",{}),jr.get("o",{})
+   if vehicles or objects:
+    companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":vehicles,"objects":objects})
+   if from_workshop:
+    stash=local_dir.with_name(local_dir.name+".swam-old")
+    if stash.exists():
+     shutil.rmtree(stash)
+    local_dir.rename(stash)
+    shutil.copytree(src.disk_path,local_dir)
+   companion.queue_task(save,sid,{"action":"spawn_env","addon":name})
+   if from_workshop:
+    settings=rec.get("settings")or{}
+    if settings:
+     try:
+      report,applied=properties.apply(save,name,scene,settings)
+      print(f"re-applied {len(applied)} saved setting(s)")
+     except SystemExit as e:
+      print(f"could not re-apply saved settings: {e}")
+    rec["source_digest"]=addons.dir_digest(src.disk_path)
+   rec["playlist_hash"]=lock.file_hash(local_dir/"playlist.xml")
+   rec["world_digest"]=addons.world_digest(local_dir)
+   lock.store(save.name,lk)
+  except BaseException:
+   if stash is not None and stash.is_dir():
+    if local_dir.exists():
+     shutil.rmtree(local_dir)
+    stash.rename(local_dir)
+    print(f"restored the previous files of '{name}' in data/missions")
+   raise
+ if stash is not None and stash.is_dir():
+  shutil.rmtree(stash)
  if tx.backup:
   print(f"backup: {tx.backup}")
  what="the workshop version"if from_workshop else"your edited local copy"
@@ -263,17 +289,24 @@ def cmd_remove_marked(args):
    return sum((a-b)**2 for a,b in zip(v["pos"],pos))**0.5
   near=sorted((v for v in vehicles if d(v)<=100),key=d)
   picked=None
+  seen_groups=set()
   for v in near:
-   if group_ok(v["group_id"]):
+   gid=v["group_id"]
+   if gid in seen_groups:
+    continue
+   seen_groups.add(gid)
+   if group_ok(gid):
     picked=v
     break
-   if v["id"]in known:
-    print(f"mark {n}: nearest structure belongs to a managed "f"addon (see swam journal) - remove that addon "f"instead; skipping")
-    break
-   print(f"mark {n}: skipping vehicle {v['id']} - the game does "f"not mark it as addon-spawned (players built it?)")
+   if any(i in known for i in groups[gid]):
+    print(f"mark {n}: skipping group {gid} - it belongs to a "f"managed addon (see swam journal); remove that addon "f"instead")
+   else:
+    print(f"mark {n}: skipping group {gid} - the game does not "f"mark it as addon-spawned (players built it?)")
   if picked is None:
    if not near:
     print(f"mark {n}: nothing within 100 m - skipped")
+   else:
+    print(f"mark {n}: nothing removable within 100 m - skipped")
    continue
   target_gids.add(picked["group_id"])
   print(f"mark {n}: vehicle group {picked['group_id']} "f"({len(groups[picked['group_id']])} vehicle(s), "f"{d(picked):.0f} m away)")
@@ -331,6 +364,17 @@ def cmd_settings(args):
    raise SystemExit(f'expected "Label=value", got: {item}')
   k,v=item.split("=",1)
   changes[k.strip()]=v.strip()
+ if args.dry_run:
+  props={p.label:p for p in properties.read(save,name,scene)}
+  unknown=[k for k in changes if k not in props]
+  if unknown:
+   raise SystemExit("no such setting: "+"; ".join(unknown))
+  for label,raw in changes.items():
+   p=props[label]
+   cur=p.saved_value if p.saved_value is not None else p.default
+   print(f"(dry-run) '{label}': {cur} -> {p.clamp(raw)}")
+  print("(dry-run) nothing was written")
+  return
  with Transaction(save,f"settings {name}",enabled=not args.no_backup)as tx:
   report,applied=properties.apply(save,name,scene,changes)
   for line in report:
@@ -345,13 +389,16 @@ def cmd_settings(args):
 def cmd_uninstall_companion(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
- sid=companion.script_id(scene)
- if sid is None:
+ entry=companion.script_entry(scene)
+ if entry is None:
   raise SystemExit("the companion is not installed in this save")
+ sid=entry["script_id"]
  if not args.really:
   raise SystemExit("This deletes the provenance journal for this save - SWAM will ""forget who spawned what,\nand clean removal of addons installed ""so far becomes impossible.\nIf you mean it, re-run with --really")
- scene.remove_playlist(companion.PLAYLIST_VALUE)
- scene.remove_script(companion.PLAYLIST_VALUE)
+ pv=companion.playlist_value(scene)
+ if pv is not None:
+  scene.remove_playlist(pv)
+ scene.remove_script(entry["path"])
  if args.dry_run:
   print(scene.diff())
   return
@@ -403,10 +450,14 @@ def cmd_restore(args):
   target=matches[0]
  else:
   target=entries[0]
+ if args.dry_run:
+  print(f"(dry-run) would roll '{args.save}' back to {target['time']} "f"({target['operation']}), backing up the current state first")
+  return
  ensure_game_closed()
- make_backup(save,"pre-restore")
+ if not args.no_backup:
+  make_backup(save,"pre-restore",keep=target["path"])
  restore_backup(save,target["path"])
- print(f"restored '{args.save}' from {target['time']} "f"({target['operation']}). The previous state was backed up as "f"'pre-restore'.")
+ print(f"restored '{args.save}' from {target['time']} "f"({target['operation']})."+(""if args.no_backup else" The previous state was backed up as ""'pre-restore'."))
 def cmd_verify(args):
  save=paths.save_dir(args.save)
  problems=verify.run(save)
@@ -418,6 +469,7 @@ def cmd_verify(args):
   raise SystemExit(f"problems: {len(problems)}")
 def cmd_status(args):
  save=paths.save_dir(args.save)
+ addons.backfill(save.name)
  lk=lock.load(save.name)
  print(f"save: {args.save}")
  if not lk["addons"]:
@@ -429,8 +481,8 @@ def cmd_status(args):
    note=""
    if addons.update_available(rec,name):
     note+="  [update available: swam upgrade-addon]"
-   if addons.local_playlist_changed(rec,name):
-    note+="  [local playlist edited: swam upgrade-addon --local]"
+   if addons.local_changed(rec,name):
+    note+="  [local files edited: swam upgrade-addon --local]"
    print(f"  {name} ({kind}, installed {rec['installed_at']}){note}")
  problems=verify.run(save)
  print(f"verify: {'ok'if not problems else f'{len(problems)} problem(s)'}")
@@ -479,11 +531,14 @@ def build_parser():
  sp.add_argument("save")
  sp.add_argument("addon",help="addon name")
  sp.add_argument("--set",action="append",metavar='"Label=value"',help="change a setting (repeatable)")
+ sp.add_argument("--dry-run",action="store_true",help="show what would change, write nothing")
  sp.add_argument("--no-backup",action="store_true")
  sp.set_defaults(fn=cmd_settings)
  sp=sub.add_parser("restore",help="restore a save from a backup")
  sp.add_argument("save")
  sp.add_argument("time",nargs="?",help="backup timestamp (default: the newest)")
+ sp.add_argument("--dry-run",action="store_true",help="show what would be restored, change nothing")
+ sp.add_argument("--no-backup",action="store_true",help="do not back up the current state first ""(not recommended)")
  sp.set_defaults(fn=cmd_restore)
  sp=sub.add_parser("install-companion",help="install the companion addon into a save")
  sp.add_argument("save")

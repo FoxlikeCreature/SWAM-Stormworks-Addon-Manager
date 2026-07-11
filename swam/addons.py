@@ -33,6 +33,15 @@ class AddonRef:
   return None
  def local_dir(self)->Path:
   return paths.sw_root()/"data"/"missions"/self.name
+ @property
+ def source(self)->str:
+  for ws in paths.workshop_dirs():
+   try:
+    self.disk_path.relative_to(ws)
+    return"workshop"
+   except ValueError:
+    continue
+  return"local"
 def resolve_addon(ident:str)->AddonRef:
  p=Path(ident).expanduser()
  if p.is_dir():
@@ -63,15 +72,23 @@ def find_script_entry(scene,addon_name:str,playlist_value:str):
     if m and m.group(1)==addon_name:
      return True,p
  return False,None
+_WS_INDEX:dict[str,Path]|None=None
+def workshop_index(refresh:bool=False)->dict[str,Path]:
+ global _WS_INDEX
+ if _WS_INDEX is None or refresh:
+  index:dict[str,Path]={}
+  for ws in paths.workshop_dirs():
+   for d in ws.iterdir():
+    pl=d/"playlist"/"playlist.xml"
+    if pl.is_file():
+     m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
+     if m and m.group(1)not in index:
+      index[m.group(1)]=d/"playlist"
+  _WS_INDEX=index
+ return _WS_INDEX
 def find_workshop_source(addon_name:str)->AddonRef|None:
- for ws in paths.workshop_dirs():
-  for d in ws.iterdir():
-   pl=d/"playlist"/"playlist.xml"
-   if pl.is_file():
-    m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
-    if m and m.group(1)==addon_name:
-     return AddonRef(d/"playlist")
- return None
+ hit=workshop_index().get(addon_name)
+ return AddonRef(hit)if hit else None
 def dir_digest(folder:Path)->str:
  import hashlib
  h=hashlib.sha256()
@@ -80,8 +97,20 @@ def dir_digest(folder:Path)->str:
    h.update(str(f.relative_to(folder)).encode())
    h.update(f.read_bytes())
  return h.hexdigest()[:16]
+def world_digest(folder:Path)->str:
+ import hashlib
+ h=hashlib.sha256()
+ for f in sorted(folder.rglob("*")):
+  if f.is_file()and f.name!="script.lua":
+   h.update(str(f.relative_to(folder)).encode())
+   h.update(f.read_bytes())
+ return h.hexdigest()[:16]
+def workshop_source(rec:dict,name:str)->AddonRef|None:
+ if rec.get("source")=="local":
+  return None
+ return find_workshop_source(name)
 def update_available(rec:dict,name:str)->bool:
- src=find_workshop_source(name)
+ src=workshop_source(rec,name)
  if src is None:
   return False
  src_digest=dir_digest(src.disk_path)
@@ -90,18 +119,35 @@ def update_available(rec:dict,name:str)->bool:
   return src_digest!=known
  local_dir=paths.sw_root()/"data"/"missions"/name
  return local_dir.is_dir()and src_digest!=dir_digest(local_dir)
-def local_playlist_changed(rec:dict,name:str)->bool:
+def backfill(save_name:str)->None:
  from.import lock
- pl=paths.sw_root()/"data"/"missions"/name/"playlist.xml"
- known=rec.get("playlist_hash")
- return known is not None and pl.is_file()and lock.file_hash(pl)!=known
+ lk=lock.load(save_name)
+ dirty=False
+ for name,rec in lk["addons"].items():
+  local_dir=paths.sw_root()/"data"/"missions"/name
+  if not local_dir.is_dir():
+   continue
+  if rec.get("source")is None:
+   rec["source"]="workshop"if find_workshop_source(name)else"local"
+   dirty=True
+  if rec.get("world_digest")is None:
+   rec["world_digest"]=world_digest(local_dir)
+   dirty=True
+ if dirty:
+  lock.store(save_name,lk)
+def local_changed(rec:dict,name:str)->bool:
+ local_dir=paths.sw_root()/"data"/"missions"/name
+ known=rec.get("world_digest")
+ if known is None or not local_dir.is_dir():
+  return False
+ return world_digest(local_dir)!=known
 def install_files(ref:AddonRef)->Path:
  dest=ref.local_dir()
  if ref.disk_path==dest:
   return dest
  if dest.exists():
-  if(dest/"playlist.xml").read_bytes()==(ref.disk_path/"playlist.xml").read_bytes():
+  if dir_digest(dest)==dir_digest(ref.disk_path):
    return dest
-  raise SystemExit(f"{dest} already holds a DIFFERENT version of this "f"addon - sort it out manually, refusing to overwrite")
+  raise SystemExit(f"{dest} already holds a DIFFERENT copy of '{ref.name}' "f"(its files do not match the source).\nAnother save may be "f"using it. Sort it out manually - refusing to overwrite")
  shutil.copytree(ref.disk_path,dest)
  return dest

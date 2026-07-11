@@ -1,4 +1,5 @@
 local TICK_DELAY = 120
+local KEEP_REPORTS = 20
 local g_tick = 0
 local g_tasks_done = false
 local function ensure(t, k, default)
@@ -97,6 +98,21 @@ if count > 0 then
 server.announce("[SWAM]", "tasks done: " .. count .. ". SAVE the game to persist")
 end
 end
+local function prune_tasks()
+local ns = {}
+for n in pairs(g_savedata.tasks) do
+if g_savedata.report[n] ~= nil then ns[#ns + 1] = n end
+end
+table.sort(ns)
+local drop = #ns - KEEP_REPORTS
+for i = 1, drop do
+g_savedata.tasks[ns[i]] = nil
+g_savedata.report[ns[i]] = nil
+end
+if drop > 0 then
+debug.log("[SWAM] pruned " .. drop .. " finished task(s) from the save")
+end
+end
 local function clean_journal()
 local removed = 0
 for _, rec in pairs(g_savedata.journal) do
@@ -130,12 +146,17 @@ if g_tick >= TICK_DELAY then
 g_tasks_done = true
 run_tasks()
 clean_journal()
+prune_tasks()
 end
 end
 end
 function onCustomCommand(full_message, peer_id, is_admin, is_auth, command, arg1)
 if command ~= "?swam" then return end
 init_savedata()
+if (arg1 == "mark" or arg1 == "unmark") and not is_admin then
+server.announce("[SWAM]", "only admins can mark structures for removal", peer_id)
+return
+end
 if arg1 == "mark" then
 local m, ok = server.getPlayerPos(peer_id)
 if not ok then

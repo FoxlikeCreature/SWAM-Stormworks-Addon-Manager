@@ -2,11 +2,12 @@ import json
 import shutil
 import time
 from pathlib import Path
-from.paths import SWAM_DATA
+from.import paths
 KEEP_BACKUPS=5
+KEEP_PRE_RESTORE=3
 def backups_root(save_name:str)->Path:
- return SWAM_DATA/"backups"/save_name
-def make_backup(save_path:Path,operation:str)->Path:
+ return paths.SWAM_DATA/"backups"/save_name
+def make_backup(save_path:Path,operation:str,keep:Path|None=None)->Path:
  ts=time.strftime("%Y%m%d-%H%M%S")
  dest=backups_root(save_path.name)/ts
  dest.parent.mkdir(parents=True,exist_ok=True)
@@ -14,11 +15,28 @@ def make_backup(save_path:Path,operation:str)->Path:
   dest=dest.with_name(dest.name+"-"+str(time.time_ns()%1000))
  shutil.copytree(save_path,dest)
  (dest.parent/f"{dest.name}.meta.json").write_text(json.dumps({"operation":operation,"save":str(save_path),"time":ts},ensure_ascii=False,indent=1))
- _prune(dest.parent)
+ _prune(dest.parent,keep)
  return dest
-def _prune(root:Path)->None:
+def _operation_of(root:Path,name:str)->str:
+ meta=root/f"{name}.meta.json"
+ if meta.is_file():
+  try:
+   return json.loads(meta.read_text()).get("operation","?")
+  except(OSError,ValueError):
+   pass
+ return"?"
+def _prune(root:Path,keep:Path|None=None)->None:
  dirs=sorted(d for d in root.iterdir()if d.is_dir())
- for old in dirs[:-KEEP_BACKUPS]:
+ protected={keep.resolve()}if keep else set()
+ groups:dict[bool,list[Path]]={True:[],False:[]}
+ for d in dirs:
+  groups[_operation_of(root,d.name)=="pre-restore"].append(d)
+ doomed=[]
+ for is_restore,quota in((True,KEEP_PRE_RESTORE),(False,KEEP_BACKUPS)):
+  doomed+=groups[is_restore][:-quota]if quota else groups[is_restore]
+ for old in doomed:
+  if old.resolve()in protected:
+   continue
   shutil.rmtree(old)
   meta=root/f"{old.name}.meta.json"
   if meta.exists():
@@ -28,14 +46,7 @@ def list_backups(save_name:str)->list[dict]:
  out=[]
  if root.is_dir():
   for d in sorted((d for d in root.iterdir()if d.is_dir()),reverse=True):
-   meta=root/f"{d.name}.meta.json"
-   op="?"
-   if meta.is_file():
-    try:
-     op=json.loads(meta.read_text()).get("operation","?")
-    except(OSError,ValueError):
-     pass
-   out.append({"path":d,"time":d.name,"operation":op})
+   out.append({"path":d,"time":d.name,"operation":_operation_of(root,d.name)})
  return out
 def restore_backup(save_path:Path,backup:Path)->None:
  tmp=save_path.with_name(save_path.name+".swam-broken")

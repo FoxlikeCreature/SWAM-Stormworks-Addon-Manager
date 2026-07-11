@@ -387,6 +387,7 @@ class App(ttk.Frame):
   try:
    save=paths.save_dir(name)
    scene=Scene(save/"scene.xml")
+   addons.backfill(name)
    lk=lock.load(name)
   except(SystemExit,OSError,ValueError)as e:
    self.log_line(str(e))
@@ -420,11 +421,15 @@ class App(ttk.Frame):
   self._update_check_running=True
   def work():
    found=[]
+   try:
+    addons.workshop_index(refresh=True)
+   except Exception:
+    pass
    for aname,rec in managed.items():
     try:
      if addons.update_available(rec,aname):
       found.append((aname,"update available"))
-     elif addons.local_playlist_changed(rec,aname):
+     elif addons.local_changed(rec,aname):
       found.append((aname,"local edits - upgrade to apply"))
     except Exception:
      pass
@@ -486,7 +491,7 @@ class App(ttk.Frame):
   tags=self.tree.item(sel[0],"tags")
   kind,ident=tags[:2]
   if kind!="addon":
-   messagebox.showinfo("SWAM","Select an addon installed by SWAM ""to upgrade it from the workshop.")
+   messagebox.showinfo("SWAM","Select an addon installed by SWAM to refresh it from the ""workshop or from its edited local files.")
    return
   rec=lock.load(save)["addons"].get(ident)
   if rec is None:
@@ -494,9 +499,10 @@ class App(ttk.Frame):
    return
   try:
    ws_update=addons.update_available(rec,ident)
-   local_changed=addons.local_playlist_changed(rec,ident)
+   local_changed=addons.local_changed(rec,ident)
+   has_workshop=addons.workshop_source(rec,ident)is not None
   except Exception:
-   ws_update,local_changed=True,False
+   ws_update,local_changed,has_workshop=True,False,True
   use_local=False
   if ws_update and local_changed:
    ans=messagebox.askyesnocancel("SWAM",f"'{ident}' has manual edits in data/missions AND a newer "f"workshop version.\n\n"f"Yes - keep your edits, refresh the save from them\n"f"No - discard the edits, take the workshop version")
@@ -504,9 +510,15 @@ class App(ttk.Frame):
     return
    use_local=ans
   elif local_changed:
-   if not messagebox.askyesno("SWAM",f"Refresh '{ident}' from its edited local copy?\n\n"f"On next world load the old structures are removed and "f"the ones from your edited playlist spawned."):
-    return
-   use_local=True
+   if has_workshop:
+    ans=messagebox.askyesnocancel("SWAM",f"'{ident}' has manual edits in data/missions.\n\n"f"Yes - refresh the save from your edited files\n"f"No - discard the edits, restore the workshop version")
+    if ans is None:
+     return
+    use_local=ans
+   else:
+    if not messagebox.askyesno("SWAM",f"Refresh '{ident}' from its edited local files?\n\n"f"On next world load the old structures are removed and "f"the ones from your edited files spawned."):
+     return
+    use_local=True
   else:
    if not messagebox.askyesno("SWAM",f"Upgrade '{ident}' from its workshop version?\n\n"f"On next world load the old structures are removed and "f"the new ones spawned."):
     return
@@ -518,7 +530,17 @@ class App(ttk.Frame):
   save=self.current_save()
   if not save:
    return
-  ans=messagebox.askyesnocancel("SWAM",'Removes the structures you marked in game by standing next to ''them and typing "?swam mark" in chat (then saving the game).\n\n''Also remove every IDENTICAL structure anywhere on the map?\n\n''Yes - marked + all identical copies\n''No - only the marked ones')
+  try:
+   save_dir=paths.save_dir(save)
+   sid=companion.script_id(Scene(save_dir/"scene.xml"))
+   marks=companion.load_data(save_dir,sid).get("marks")or{}if sid is not None else{}
+  except(SystemExit,OSError,ValueError)as e:
+   messagebox.showinfo("SWAM",str(e))
+   return
+  if not marks:
+   messagebox.showinfo("SWAM",'No structures are marked in this save.\n\nIn game, stand next to the structure you want gone, type ''"?swam mark" in chat, SAVE the game and close it - then use ''this button.')
+   return
+  ans=messagebox.askyesnocancel("SWAM",f'{len(marks)} structure(s) marked in game.\n\n''Also remove every IDENTICAL structure anywhere on the map?\n\n''Yes - marked + all identical copies\n''No - only the marked ones')
   if ans is None:
    return
   def op():
@@ -533,6 +555,9 @@ class App(ttk.Frame):
    return
   tags=self.tree.item(sel[0],"tags")
   kind,aname=tags[:2]
+  if kind=="builtin":
+   messagebox.showinfo("SWAM","Built-in (vanilla) addons keep their files inside the game ""installation, which SWAM does not modify - their settings ""cannot be edited.")
+   return
   if kind not in("addon","companion"):
    messagebox.showinfo("SWAM","Settings exist only for addons.")
    return
@@ -610,7 +635,7 @@ class App(ttk.Frame):
    dlg.destroy()
    def op():
     from.cli import cmd_settings
-    cmd_settings(_Args(save=save,addon=aname,set=changes,no_backup=False))
+    cmd_settings(_Args(save=save,addon=aname,set=changes,dry_run=False,no_backup=False))
    self.run_op(f"settings {aname}",op)
   ttk.Button(row_f,text="Cancel",command=dlg.destroy).pack(side="right")
   ttk.Button(row_f,text="Apply",style="Accent.TButton",command=do_apply).pack(side="right",padx=(0,8))
@@ -744,12 +769,8 @@ class App(ttk.Frame):
   if not messagebox.askyesno("SWAM",f"Roll '{save}' back to {target['time']}?\n\n"f"The current state is backed up first, so this is "f"reversible."):
    return
   def op():
-   from.backup import make_backup,restore_backup
-   from.guard import ensure_game_closed
-   ensure_game_closed()
-   make_backup(paths.save_dir(save),"pre-restore")
-   restore_backup(paths.save_dir(save),target["path"])
-   print(f"restored from {target['time']} ({target['operation']})")
+   from.cli import cmd_restore
+   cmd_restore(_Args(save=save,time=target["time"],dry_run=False,no_backup=False))
   self.run_op(f"restore {target['time']}",op)
  def run_verify(self):
   save=self.current_save()

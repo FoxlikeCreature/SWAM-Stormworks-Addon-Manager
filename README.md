@@ -32,8 +32,9 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
   removed from the world, not just the menu entry.
 - **Update addons** to their newest workshop version: old structures out,
   new ones in, one world load. Works for hand-edited local copies too:
-  change an addon's `playlist.xml` in `data/missions` and SWAM notices,
-  then refreshes the world from your edited version on request.
+  change an addon's files in `data/missions` and SWAM notices, then
+  refreshes the world from your edited version on request (or puts the
+  workshop version back, if you'd rather drop the edits).
 - **Edit addon settings** - the same sliders and checkboxes the game shows
   at world creation, but for a world that already exists. Works because the
   game never stores those values itself: scripts read the defaults from
@@ -134,8 +135,9 @@ is enough.
    SWAM removes the marked structure and (optionally) every identical
    copy of it on the map. Player-built vehicles are never touched: SWAM
    only accepts vehicles the game itself marked as addon-spawned, with no
-   author list. Chat commands: `?swam` (status), `?swam mark`,
-   `?swam unmark`.
+   author list. Chat commands: `?swam` (status, anyone), `?swam mark` and
+   `?swam unmark` (admins only, so nobody can mark the server's buildings
+   for deletion on a multiplayer world).
 
 ## Using the CLI
 
@@ -152,9 +154,9 @@ swam add-addon <save> <id|path|name>
 swam remove-addon <save> <name>     # --force for inherited addons,
                                     # --force-geometry to also remove their statics
 swam upgrade-addon <save> <name>    # refresh from workshop, or with
-                                    # --local from your edited copy in
+                                    # --local from your edited files in
                                     # data/missions (--discard-local
-                                    # overwrites edits with workshop)
+                                    # restores the workshop version)
 swam settings <save> <name>         # view addon settings
 swam settings <save> <name> --set "Label=value"   # change them
 swam cleanup <save> <name>          # despawn an addon's leftover structures
@@ -167,9 +169,16 @@ swam journal <save>                 # what the companion has recorded
 swam verify <save>                  # integrity audit
 ```
 
-Every mutating command accepts `--dry-run` (show the diff, change nothing)
-and `--no-backup`. Backups live in `~/.local/share/swam/backups/`
-(`%LOCALAPPDATA%\swam\backups` on Windows), the last 5 per save are kept.
+Every mutating command - including `restore` and `settings` - accepts
+`--dry-run` (show what would happen, change nothing) and `--no-backup`.
+Installed as a package, the same commands are available as `swam …`;
+from a clone, use `python -m swam …`.
+
+Backups live in `~/.local/share/swam/backups/`
+(`%LOCALAPPDATA%\swam\backups` on Windows): the last 5 per save, plus up
+to 3 "pre-restore" ones kept on their own quota so that rolling back
+never evicts your ordinary backups. The backup you restore *from* is
+never pruned.
 If your game lives somewhere unusual, point `SWAM_SW_ROOT` at the folder
 containing `saves` and `data`.
 

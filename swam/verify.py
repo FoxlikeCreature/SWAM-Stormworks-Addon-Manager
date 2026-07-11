@@ -37,6 +37,11 @@ def run(save_path:Path)->list[str]:
   pl=paths.sw_root()/rec["playlist_value"]/"playlist.xml"
   if not pl.is_file():
    problems.append(f"lock: files of addon '{name}' disappeared from disk")
-  elif lock.file_hash(pl)!=rec["playlist_hash"]:
-   problems.append(f"lock: playlist.xml of addon '{name}' changed "f"after installation")
  return problems
+def local_edits(save_path:Path)->list[str]:
+ from.import addons
+ out=[]
+ for name,rec in lock.load(save_path.name)["addons"].items():
+  if addons.local_changed(rec,name):
+   out.append(name)
+ return out

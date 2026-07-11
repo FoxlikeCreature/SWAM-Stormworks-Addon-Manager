@@ -2,9 +2,9 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from.paths import SWAM_DATA
+from.import paths
 def lock_path(save_name:str)->Path:
- return SWAM_DATA/"locks"/f"{save_name}.json"
+ return paths.SWAM_DATA/"locks"/f"{save_name}.json"
 def load(save_name:str)->dict:
  p=lock_path(save_name)
  if p.is_file():
@@ -18,5 +18,5 @@ def store(save_name:str,data:dict)->None:
  tmp.replace(p)
 def file_hash(path:Path)->str:
  return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
-def addon_record(name:str,playlist_value:str,scripted:bool,playlist_hash:str)->dict:
- return{"name":name,"playlist_value":playlist_value,"scripted":scripted,"playlist_hash":playlist_hash,"installed_at":time.strftime("%Y-%m-%d %H:%M:%S"),"script_id":None,"spawned":[],}
+def addon_record(name:str,playlist_value:str,scripted:bool,playlist_hash:str,source:str="workshop",world_digest:str="")->dict:
+ return{"name":name,"playlist_value":playlist_value,"scripted":scripted,"playlist_hash":playlist_hash,"world_digest":world_digest,"source":source,"installed_at":time.strftime("%Y-%m-%d %H:%M:%S"),"script_id":None,"spawned":[],}
