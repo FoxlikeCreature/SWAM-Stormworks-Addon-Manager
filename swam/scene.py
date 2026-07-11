@@ -5,9 +5,18 @@ class SceneError(SystemExit):
 class Scene:
  def __init__(self,path:Path):
   self.path=path
-  with open(path,encoding="utf-8",errors="strict",newline="")as f:
-   self.text=f.read()
+  try:
+   with open(path,encoding="utf-8",errors="strict",newline="")as f:
+    self.text=f.read()
+  except UnicodeDecodeError as e:
+   raise SceneError(f"{path} is not readable as text ({e}) - the file is "f"corrupted. Restore a backup: swam restore <save>")
   self._orig=self.text
+  try:
+   if"<scene"not in self.text or"<active_playlists"not in self.text:
+    raise SceneError("it has no <scene>/<active_playlists> section")
+   self.verify()
+  except SceneError as e:
+   raise SceneError(f"{path} looks damaged ({e}).\nThe game may have crashed "f"while saving. Restore a backup (swam backups / swam restore) ""or the save's autosave copy")
  @property
  def dirty(self)->bool:
   return self.text!=self._orig
@@ -47,21 +56,26 @@ class Scene:
   self.text=self.text[:idx]+self.text[idx+len(entry):]
   self._collapse_if_empty("active_mods")
  def list_playlists(self)->list[str]:
-  m=re.search(r"<active_playlists>.*?</active_playlists>",self.text,re.S)
+  m=re.search(r"<active_playlists>.*?</active_playlists>|<active_playlists/>",self.text,re.S)
   if not m:
    raise SceneError("<active_playlists> section not found")
   return re.findall(r'<playlist_name value="([^"]*)"/>',m.group(0))
  def add_playlist(self,value:str)->None:
   if value in self.list_playlists():
    raise SceneError(f"playlist already attached: {value}")
+  entry=f'\t\t\t<playlist_name value="{value}"/>\n'
+  if"<active_playlists/>"in self.text:
+   self._find_once("<active_playlists/>","<active_playlists/>")
+   self.text=self.text.replace("<active_playlists/>","<active_playlists>\n"+entry+"\t\t</active_playlists>",1)
+   return
   close="\t\t</active_playlists>"
   self._find_once(close,"closing </active_playlists>")
-  entry=f'\t\t\t<playlist_name value="{value}"/>\n'
   self.text=self.text.replace(close,entry+close,1)
  def remove_playlist(self,value:str)->None:
   entry=f'\t\t\t<playlist_name value="{value}"/>\n'
   idx=self._find_once(entry,f"playlist entry {value}")
   self.text=self.text[:idx]+self.text[idx+len(entry):]
+  self._collapse_if_empty("active_playlists")
  def list_scripts(self)->list[dict]:
   tail=self.text[self.text.rfind("<scripts>"):]
   out=[]
@@ -75,9 +89,14 @@ class Scene:
   if any(s["path"]==path for s in self.list_scripts()):
    raise SceneError(f"script already attached: {path}")
   sid=self.next_script_id()
+  entry=f'\t\t\t<s script_id="{sid}" store="{store}" path="{path}"/>\n'
+  inner="\t\t<scripts/>"
+  if inner in self.text:
+   self._find_once(inner,"empty <scripts/> section")
+   self.text=self.text.replace(inner,"\t\t<scripts>\n"+entry+"\t\t</scripts>",1)
+   return sid
   close="\t\t</scripts>\n\t</scripts>"
   self._find_once(close,"closing tags of the scripts section")
-  entry=f'\t\t\t<s script_id="{sid}" store="{store}" path="{path}"/>\n'
   self.text=self.text.replace(close,entry+close,1)
   return sid
  def remove_script(self,path:str)->int:
@@ -89,6 +108,7 @@ class Scene:
   entry=(f'\t\t\t<s {id_attr}store="{recs[0]["store"]}" 'f'path="{path}"/>\n')
   idx=self._find_once(entry,f"<s> entry {path}")
   self.text=self.text[:idx]+self.text[idx+len(entry):]
+  self._collapse_if_empty("scripts")
   return sid
  def verify(self)->None:
   for tag in("active_mods","active_playlists","scripts","game_data","scene"):

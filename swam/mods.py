@@ -13,7 +13,8 @@ class ModRef:
   if mod_xml.is_file():
    m=re.search(r'<mod name="([^"]*)"',mod_xml.read_text(errors="replace"))
    if m:
-    return m.group(1)
+    from.import addons
+    return addons.xml_unescape(m.group(1))
   return f"<{self.mod_id}>"
  @property
  def has_tiles(self)->bool:
@@ -48,5 +49,6 @@ def describe_wine_path(wine_path:str)->str:
   if(cand/"mod.xml").is_file():
    m=re.search(r'<mod name="([^"]*)"',(cand/"mod.xml").read_text(errors="replace"))
    if m:
-    return f"{mod_id}  {m.group(1)}"
+    from.import addons
+    return f"{mod_id}  {addons.xml_unescape(m.group(1))}"
  return f"{mod_id}  <mod files not found on disk!>"

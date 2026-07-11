@@ -11,15 +11,14 @@ def run(save_path:Path)->list[str]:
   problems.append(f"scene.xml: {e}")
  scripts=scene.list_scripts()
  playlists=scene.list_playlists()
+ from.import addons
  for s in scripts:
   if s["store"]!=4:
    continue
-  folder=paths.sw_root()/s["path"]
-  if not(folder/"playlist.xml").is_file():
+  if addons.playlist_dir(s["path"])is None:
    problems.append(f"addon from <s> is missing on disk: {s['path']}")
   if s["path"]not in playlists:
    problems.append(f"addon in <s> but not in active_playlists: {s['path']}")
- from.import addons
  for v in playlists:
   if v.startswith("rom/"):
    continue
@@ -36,8 +35,8 @@ def run(save_path:Path)->list[str]:
  for name,rec in lk["addons"].items():
   if rec["playlist_value"]not in playlists:
    problems.append(f"lock: addon '{name}' is recorded as installed, "f"but there is no active_playlists entry")
-  pl=paths.sw_root()/rec["playlist_value"]/"playlist.xml"
-  if not pl.is_file():
+  d=addons.playlist_dir(rec["playlist_value"])
+  if d is None:
    problems.append(f"lock: files of addon '{name}' disappeared from disk")
  return problems
 def local_edits(save_path:Path)->list[str]:

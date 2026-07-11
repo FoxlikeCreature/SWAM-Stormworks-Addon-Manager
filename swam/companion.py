@@ -33,7 +33,8 @@ def _names_companion(value:str)->bool:
  if not pl.is_file():
   return False
  m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
- return bool(m and m.group(1)==NAME)
+ from.import addons
+ return bool(m and addons.xml_unescape(m.group(1))==NAME)
 def script_entry(scene:Scene)->dict|None:
  for s in scene.list_scripts():
   if s["path"]==PLAYLIST_VALUE or(s["store"]==3 and _names_companion(s["path"])):

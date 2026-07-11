@@ -107,8 +107,11 @@ def _num(v)->str:
  f=float(v)
  return str(int(f))if f==int(f)else repr(f)
 def load_file(path:Path)->dict:
- with open(path,encoding="utf-8",errors="strict",newline="")as f:
-  return parse(f.read())
+ try:
+  with open(path,encoding="utf-8",errors="strict",newline="")as f:
+   return parse(f.read())
+ except(ValueError,UnicodeDecodeError)as e:
+  raise SystemExit(f"{path} is not readable as addon state ({e}).\nThe game probably ""crashed while writing it. Restore a backup of this save "f"(swam backups / swam restore), or delete the file if the addon ""may start from scratch")
 def save_file(path:Path,data:dict)->None:
  tmp=path.with_suffix(".xml.swam-tmp")
  with open(tmp,"w",encoding="utf-8",newline="")as f:

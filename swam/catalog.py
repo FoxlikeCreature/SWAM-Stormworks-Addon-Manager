@@ -13,11 +13,13 @@ class Item:
   except OSError:
    self.mtime=0.0
 def _playlist_name(pl:Path)->str|None:
+ from.import addons
  m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
- return m.group(1)if m else None
+ return addons.xml_unescape(m.group(1))if m else None
 def _mod_name(mx:Path)->str|None:
+ from.import addons
  m=re.search(r'<mod name="([^"]*)"',mx.read_text(errors="replace"))
- return m.group(1)if m else None
+ return addons.xml_unescape(m.group(1))if m else None
 def _find_preview(folder:Path)->Path|None:
  wanted=("workshop_preview.png","mod.png","preview.png","thumbnail.png")
  try:

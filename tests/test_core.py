@@ -422,3 +422,49 @@ def test_lock_knows_which_saves_share_an_addon(sw_root):
  lock.store("other",other)
  assert lock.other_saves_using("Zone Pack","testsave")==["other"]
  assert lock.other_saves_using("Zone Pack","other")==["testsave"]
+def test_addon_name_with_xml_escapes(sw_root):
+ from swam import addons,lock,paths,verify,companion,savedata
+ from swam.scene import Scene
+ A="Search & Rescue"
+ d=sw_root/"data"/"missions"/A
+ d.mkdir()
+ (d/"playlist.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Search &amp; Rescue">\n''\t<locations location_id_counter="1">\n\t\t<locations/>\n''\t</locations>\n</playlist>\n')
+ run_cli("install-companion","testsave","--no-backup")
+ before=read_scene(sw_root)
+ run_cli("add-addon","testsave",A,"--no-backup")
+ text=read_scene(sw_root)
+ assert'<playlist_name value="data/missions/Search &amp; Rescue"/>'in text
+ assert addons.resolve_addon(A).name==A
+ assert A in lock.load("testsave")["addons"]
+ sid=companion.script_id(Scene(paths.save_dir("testsave")/"scene.xml"))
+ task=list(companion.load_data(paths.save_dir("testsave"),sid)["tasks"].values())[-1]
+ assert task["addon"]==A,"the game looks the addon up by its real name"
+ assert verify.run(paths.save_dir("testsave"))==[]
+ run_cli("remove-addon","testsave",A,"--no-backup")
+ assert read_scene(sw_root)==before
+def test_a_save_with_no_addons_at_all(sw_root):
+ scene_path=sw_root/"saves"/"testsave"/"scene.xml"
+ bare=('<?xml version="1.0" encoding="UTF-8"?>\n<scene version="4">\n''\t<game_data day_tick="1">\n\t\t<active_playlists/>\n''\t\t<active_mods/>\n\t</game_data>\n\t<scripts>\n''\t\t<scripts/>\n\t</scripts>\n</scene>\n')
+ with open(scene_path,"w",encoding="utf-8",newline="")as f:
+  f.write(bare)
+ run_cli("add-addon","testsave","Logic Pack","--no-backup")
+ text=read_scene(sw_root)
+ assert'<playlist_name value="data/missions/Logic Pack"/>'in text
+ assert'store="4" path="data/missions/Logic Pack"'in text
+ run_cli("remove-addon","testsave","Logic Pack","--no-backup")
+ assert read_scene(sw_root)==bare,"an addon-less save must come back exactly as it was"
+def test_corrupted_files_are_refused_with_a_clear_message(sw_root):
+ from swam import paths,savedata
+ scene_path=paths.save_dir("testsave")/"scene.xml"
+ with open(scene_path,encoding="utf-8",newline="")as f:
+  good=f.read()
+ with open(scene_path,"w",encoding="utf-8",newline="")as f:
+  f.write(good[:len(good)//2])
+ with pytest.raises(SystemExit,match="damaged"):
+  run_cli("list","testsave")
+ with open(scene_path,"w",encoding="utf-8",newline="")as f:
+  f.write(good)
+ sd=paths.save_dir("testsave")/"script_data"/"9.xml"
+ sd.write_text("")
+ with pytest.raises(SystemExit,match="not readable as addon state"):
+  savedata.load_file(sd)

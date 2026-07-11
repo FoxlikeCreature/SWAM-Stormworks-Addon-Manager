@@ -1,7 +1,14 @@
 import re
 import shutil
 from pathlib import Path
+from xml.sax.saxutils import escape as _esc,unescape as _unesc
 from.import paths
+def xml_escape(s:str)->str:
+ return _esc(s,{'"':"&quot;","'":"&apos;"})
+def xml_unescape(s:str)->str:
+ return _unesc(s,{"&quot;":'"',"&apos;":"'"})
+def value_for(addon_name:str)->str:
+ return f"data/missions/{xml_escape(addon_name)}"
 class AddonRef:
  def __init__(self,disk_path:Path):
   self.disk_path=disk_path
@@ -11,7 +18,7 @@ class AddonRef:
   m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
   if not m:
    raise SystemExit(f"playlist.xml has no name attribute: {pl}")
-  self.name=m.group(1)
+  self.name=xml_unescape(m.group(1))
   bad=set(self.name)&set('<>:"/\\|?*')
   if bad or self.name!=self.name.strip()or self.name.endswith("."):
    raise SystemExit(f"the addon calls itself {self.name!r}, and that name cannot "f"become a folder under data/missions on Windows (leading or "f"trailing spaces, a trailing dot, or one of <>:\"/\\|?*).\n"f"Rename it in {pl} - both the name attribute and the folder - "f"and add it again")
@@ -21,7 +28,7 @@ class AddonRef:
   return s.is_file()and len(s.read_bytes().strip())>0
  @property
  def playlist_value(self)->str:
-  return f"data/missions/{self.name}"
+  return value_for(self.name)
  def init_risk(self)->str|None:
   s=self.disk_path/"script.lua"
   if not s.is_file():
@@ -69,7 +76,7 @@ def playlist_dir(value:str)->Path|None:
     return d
   return None
  if value.startswith("data/missions/"):
-  d=paths.sw_root()/value
+  d=paths.sw_root()/"data"/"missions"/xml_unescape(value.split("/",2)[2])
   return d if(d/"playlist.xml").is_file()else None
  disk=paths.game_path_to_disk(value)
  if disk is None:
@@ -77,7 +84,7 @@ def playlist_dir(value:str)->Path|None:
  return disk if(disk/"playlist.xml").is_file()else None
 def playlist_name(value:str)->str|None:
  if value.startswith("data/missions/"):
-  return value.split("/",2)[2]
+  return xml_unescape(value.split("/",2)[2])
  d=playlist_dir(value)
  if d is None:
   return None
@@ -85,9 +92,9 @@ def playlist_name(value:str)->str|None:
  if not pl.is_file():
   return None
  m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
- return m.group(1)if m else None
+ return xml_unescape(m.group(1))if m else None
 def attached_value(scene,addon_name:str)->str|None:
- direct=f"data/missions/{addon_name}"
+ direct=value_for(addon_name)
  values=scene.list_playlists()
  if direct in values:
   return direct
@@ -111,7 +118,7 @@ def find_script_entry(scene,addon_name:str,playlist_value:str):
    disk=paths.game_path_to_disk(p)
    if disk and(disk/"playlist.xml").is_file():
     m=re.search(r'<playlist [^>]*name="([^"]*)"',(disk/"playlist.xml").read_text(errors="replace"))
-    if m and m.group(1)==addon_name:
+    if m and xml_unescape(m.group(1))==addon_name:
      return True,p
  return False,None
 _WS_INDEX:dict[str,Path]|None=None
@@ -124,8 +131,8 @@ def workshop_index(refresh:bool=False)->dict[str,Path]:
     pl=d/"playlist"/"playlist.xml"
     if pl.is_file():
      m=re.search(r'<playlist [^>]*name="([^"]*)"',pl.read_text(errors="replace"))
-     if m and m.group(1)not in index:
-      index[m.group(1)]=d/"playlist"
+     if m and xml_unescape(m.group(1))not in index:
+      index[xml_unescape(m.group(1))]=d/"playlist"
   _WS_INDEX=index
  return _WS_INDEX
 def find_workshop_source(addon_name:str)->AddonRef|None:
