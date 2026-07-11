@@ -507,3 +507,24 @@ def test_objects_are_matched_and_despawned_too(sw_root):
  vids,oids,warns=geometry.match_all(scene,"Prop Pack",["data/missions/Prop Pack"])
  assert oids==[77],"only the game-attested object is claimed"
  assert any("not mark it as addon-spawned"in w for w in warns)
+def test_a_failed_backup_leaves_nothing_behind(sw_root,monkeypatch):
+ import shutil
+ from swam import backup,paths
+ def boom(src,dst,*a,**k):
+  Path(dst).mkdir(parents=True,exist_ok=True)
+  (Path(dst)/"half.xml").write_text("partial")
+  raise OSError(28,"No space left on device")
+ monkeypatch.setattr(shutil,"copytree",boom)
+ with pytest.raises(SystemExit,match="backup of 'testsave' failed"):
+  backup.make_backup(paths.save_dir("testsave"),"test")
+ assert backup.list_backups("testsave")==[]
+ root=backup.backups_root("testsave")
+ assert not any(root.iterdir())if root.is_dir()else True
+def test_half_written_backups_are_never_offered(sw_root):
+ from swam import backup,paths
+ good=backup.make_backup(paths.save_dir("testsave"),"real")
+ half=backup.backups_root("testsave")/"20990101-000000"
+ half.mkdir()
+ (half/"scene.xml").write_text("truncated")
+ offered=[e["time"]for e in backup.list_backups("testsave")]
+ assert offered==[good.name],"a backup without its meta file is not a backup"

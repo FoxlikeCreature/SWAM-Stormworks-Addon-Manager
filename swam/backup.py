@@ -17,11 +17,28 @@ def make_backup(save_path:Path,operation:str,keep:Path|None=None)->Path:
  else:
   taken={int(n.split("-")[2])for n in used if n.count("-")==2 and n.split("-")[2].isdigit()}
   dest=root/f"{ts}-{max(taken,default=0)+1:03d}"
- shutil.copytree(save_path,dest)
+ need=_dir_size(save_path)
+ free=shutil.disk_usage(root).free
+ if free<need*1.1:
+  raise SystemExit(f"not enough room for a backup of '{save_path.name}': it needs "f"about {need//(1024*1024)} MB, only {free//(1024*1024)} MB free "f"in {root}.\nFree some space, or point SWAM_DATA_DIR at another "f"disk, or re-run with --no-backup if you know what you are doing")
+ try:
+  shutil.copytree(save_path,dest)
+ except BaseException as e:
+  shutil.rmtree(dest,ignore_errors=True)
+  raise SystemExit(f"the backup of '{save_path.name}' failed ({e}) - nothing was "f"changed. The half-written copy has been removed")
  (root/f"{dest.name}.meta.json").write_text(json.dumps({"operation":operation,"save":str(save_path),"time":dest.name},ensure_ascii=False,indent=1))
  _snapshot_lock(save_path.name,root/f"{dest.name}.lock.json")
  _prune(root,keep)
  return dest
+def _dir_size(p:Path)->int:
+ total=0
+ for f in p.rglob("*"):
+  try:
+   if f.is_file():
+    total+=f.stat().st_size
+  except OSError:
+   continue
+ return total
 def _snapshot_lock(save_name:str,dest:Path)->None:
  from.import lock
  src=lock.lock_path(save_name)
@@ -67,6 +84,8 @@ def list_backups(save_name:str)->list[dict]:
  out=[]
  if root.is_dir():
   for d in reversed(_sorted_dirs(root)):
+   if not(root/f"{d.name}.meta.json").is_file():
+    continue
    out.append({"path":d,"time":d.name,"operation":_operation_of(root,d.name)})
  return out
 def restore_backup(save_path:Path,backup:Path)->None:

@@ -53,7 +53,9 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
 - Addons that were already in the save before SWAM ("inherited") have no
   ownership records anywhere - removing *their* structures uses careful
   coordinate matching (exact spawn-point positions with a small physics
-  tolerance, only on vehicles the game itself marks as addon-spawned),
+  tolerance, only on vehicles and objects the game itself marks as
+  addon-spawned, and never on anything the companion's journal attributes
+  to a different addon),
   which covers placed buildings but not things their scripts spawned in
   the past. For those there is a manual fallback: stand next to the
   structure in game, type `?swam mark` in chat, save - and SWAM removes it
