@@ -107,8 +107,17 @@ def _busy_path(save_name:str)->Path:
  return paths.SWAM_DATA/"locks"/f"{save_name}.busy"
 def _alive(pid:int)->bool:
  import os
- if pid<=0:
-  return False
+ import sys
+ if pid<=0 or pid==os.getpid():
+  return pid==os.getpid()
+ if sys.platform=="win32":
+  import ctypes
+  SYNCHRONIZE=0x00100000
+  h=ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE,False,pid)
+  if not h:
+   return False
+  ctypes.windll.kernel32.CloseHandle(h)
+  return True
  try:
   os.kill(pid,0)
  except ProcessLookupError:
