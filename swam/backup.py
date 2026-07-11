@@ -19,8 +19,23 @@ def make_backup(save_path:Path,operation:str,keep:Path|None=None)->Path:
   dest=root/f"{ts}-{max(taken,default=0)+1:03d}"
  shutil.copytree(save_path,dest)
  (root/f"{dest.name}.meta.json").write_text(json.dumps({"operation":operation,"save":str(save_path),"time":dest.name},ensure_ascii=False,indent=1))
+ _snapshot_lock(save_path.name,root/f"{dest.name}.lock.json")
  _prune(root,keep)
  return dest
+def _snapshot_lock(save_name:str,dest:Path)->None:
+ from.import lock
+ src=lock.lock_path(save_name)
+ if src.is_file():
+  shutil.copy2(src,dest)
+def _restore_lock(save_name:str,backup:Path)->None:
+ from.import lock
+ snap=backup.parent/f"{backup.name}.lock.json"
+ target=lock.lock_path(save_name)
+ if snap.is_file():
+  target.parent.mkdir(parents=True,exist_ok=True)
+  shutil.copy2(snap,target)
+ elif target.is_file():
+  target.unlink()
 def _operation_of(root:Path,name:str)->str:
  meta=root/f"{name}.meta.json"
  if meta.is_file():
@@ -44,9 +59,9 @@ def _prune(root:Path,keep:Path|None=None)->None:
   if old.resolve()in protected:
    continue
   shutil.rmtree(old)
-  meta=root/f"{old.name}.meta.json"
-  if meta.exists():
-   meta.unlink()
+  for side in(root/f"{old.name}.meta.json",root/f"{old.name}.lock.json"):
+   if side.exists():
+    side.unlink()
 def list_backups(save_name:str)->list[dict]:
  root=backups_root(save_name)
  out=[]
@@ -67,6 +82,7 @@ def restore_backup(save_path:Path,backup:Path)->None:
   if not save_path.exists():
    tmp.rename(save_path)
   raise
+ _restore_lock(save_path.name,backup)
  shutil.rmtree(tmp)
 class Transaction:
  def __init__(self,save_path:Path,operation:str,enabled:bool=True):

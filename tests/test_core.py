@@ -404,3 +404,21 @@ def test_commented_out_properties_are_ignored(sw_root):
  from swam import properties
  src=('-- old = property.slider("Ghost", 1, 10, 1, 5)\n''--[[ dead = property.checkbox("Buried") ]]\n''real = property.checkbox("Real", "false")\n')
  assert[p.label for p in properties.parse_schema(src)]==["Real"]
+def test_restore_rolls_back_the_lock_file_too(sw_root):
+ from swam import lock,paths,verify
+ run_cli("add-addon","testsave","Zone Pack")
+ assert"Zone Pack"in lock.load("testsave")["addons"]
+ run_cli("restore","testsave")
+ assert lock.load("testsave")["addons"]=={},"the lock must roll back with the save"
+ assert verify.run(paths.save_dir("testsave"))==[]
+ run_cli("restore","testsave")
+ assert"Zone Pack"in lock.load("testsave")["addons"]
+ assert verify.run(paths.save_dir("testsave"))==[]
+def test_lock_knows_which_saves_share_an_addon(sw_root):
+ from swam import lock
+ run_cli("add-addon","testsave","Zone Pack","--no-backup")
+ other=lock.load("other")
+ other["addons"]["Zone Pack"]=lock.addon_record("Zone Pack","data/missions/Zone Pack",False,"x")
+ lock.store("other",other)
+ assert lock.other_saves_using("Zone Pack","testsave")==["other"]
+ assert lock.other_saves_using("Zone Pack","other")==["testsave"]

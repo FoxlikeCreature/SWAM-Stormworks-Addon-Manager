@@ -128,8 +128,8 @@ debug.log("[SWAM] pruned " .. drop .. " finished task(s) from the save")
 end
 end
 local function clean_journal()
-local removed = 0
-for _, rec in pairs(g_savedata.journal) do
+local removed, forgotten = 0, 0
+for name, rec in pairs(g_savedata.journal) do
 if rec.o then
 for i, id in pairs(rec.o) do
 local _, ok = server.getObjectPos(id)
@@ -148,9 +148,14 @@ removed = removed + 1
 end
 end
 end
+if count(rec.v) == 0 and count(rec.o) == 0 then
+g_savedata.journal[name] = nil
+forgotten = forgotten + 1
 end
-if removed > 0 then
-debug.log("[SWAM] journal cleanup: dropped " .. removed .. " dead ids")
+end
+if removed > 0 or forgotten > 0 then
+debug.log("[SWAM] journal cleanup: dropped " .. removed ..
+" dead ids and " .. forgotten .. " empty record(s)")
 end
 end
 function onTick(game_ticks)

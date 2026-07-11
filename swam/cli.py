@@ -193,6 +193,9 @@ def cmd_upgrade_addon(args):
  sid=companion.script_id(scene)
  if sid is None:
   raise SystemExit("the companion is required for upgrades ""(swam install-companion)")
+ shared=lock.other_saves_using(name,save.name)
+ if shared:
+  print(f"note: {len(shared)} other save(s) use the same files in "f"data/missions ({', '.join(shared[:3])}"f"{'...'if len(shared)>3 else''}). They get the new version too, "f"but their structures are only refreshed when you upgrade the "f"addon there as well")
  source_desc=str(src.disk_path)if from_workshop else f"local edits in {local_dir}"
  if args.dry_run:
   steps="despawn old structures -> replace files -> respawn"if from_workshop else"despawn old structures -> respawn from the edited local files"

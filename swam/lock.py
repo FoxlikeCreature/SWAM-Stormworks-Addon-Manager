@@ -5,6 +5,22 @@ from pathlib import Path
 from.import paths
 def lock_path(save_name:str)->Path:
  return paths.SWAM_DATA/"locks"/f"{save_name}.json"
+def other_saves_using(addon_name:str,except_save:str)->list[str]:
+ out=[]
+ d=paths.SWAM_DATA/"locks"
+ if not d.is_dir():
+  return out
+ for f in sorted(d.glob("*.json")):
+  name=f.stem
+  if name==except_save:
+   continue
+  try:
+   data=json.loads(f.read_text(encoding="utf-8"))
+  except(OSError,ValueError):
+   continue
+  if addon_name in(data.get("addons")or{}):
+   out.append(name)
+ return out
 def load(save_name:str)->dict:
  p=lock_path(save_name)
  if p.is_file():
