@@ -529,8 +529,11 @@ def test_half_written_backups_are_never_offered(sw_root):
  offered=[e["time"]for e in backup.list_backups("testsave")]
  assert offered==[good.name],"a backup without its meta file is not a backup"
 def test_two_swam_operations_cannot_overlap(sw_root):
+ import os
  from swam import backup
- held=backup.acquire("testsave")
+ held=backup._busy_path("testsave")
+ held.parent.mkdir(parents=True,exist_ok=True)
+ held.write_text(str(os.getppid()))
  with pytest.raises(SystemExit,match="another SWAM operation"):
   run_cli("add-addon","testsave","Zone Pack","--no-backup")
  backup.release(held)
