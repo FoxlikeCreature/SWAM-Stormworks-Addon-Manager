@@ -145,11 +145,7 @@ def cmd_remove_addon(args):
 def cmd_install_companion(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
- entry=companion.script_entry(scene)
- if entry is not None:
-  if entry["store"]==3:
-   print("companion already installed in this save - it comes straight ""from the workshop, so Steam keeps it up to date (SWAM leaves ""those files alone)")
-   return
+ if companion.is_installed(scene):
   companion.install_files()
   print("companion already installed, script refreshed")
   return

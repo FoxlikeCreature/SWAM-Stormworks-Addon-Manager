@@ -1,0 +1,5 @@
+[console_scripts]
+swam = swam.cli:main
+
+[gui_scripts]
+swam-gui = swam.gui:main

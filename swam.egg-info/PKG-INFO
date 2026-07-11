@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: swam
+Version: 0.1.7
+Summary: Addon and mod manager for existing Stormworks: Build and Rescue saves
+License: MIT
+Keywords: stormworks,addon,mod,save,manager
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
+
 # SWAM - Stormworks Addon Manager
 
 ![SWAM - add, remove and update addons in saves that already exist](assets/header.png)
@@ -181,8 +192,7 @@ to 3 "pre-restore" ones kept on their own quota so that rolling back
 never evicts your ordinary backups. The backup you restore *from* is
 never pruned.
 If your game lives somewhere unusual, point `SWAM_SW_ROOT` at the folder
-containing `saves` and `data`; `SWAM_DATA_DIR` moves SWAM's own backups
-and lock files somewhere else.
+containing `saves` and `data`.
 
 ---
 

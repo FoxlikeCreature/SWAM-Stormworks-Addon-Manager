@@ -389,3 +389,18 @@ def test_verify_notices_a_missing_workshop_playlist(sw_root,tmp_path):
  scene.write()
  problems=verify.run(paths.save_dir("testsave"))
  assert any("playlist missing on disk"in p for p in problems)
+def test_property_without_a_default_gets_one_instead_of_losing_its_label(sw_root):
+ from swam import properties
+ d=sw_root/"data"/"missions"/"Bare Pack"
+ d.mkdir()
+ (d/"playlist.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Bare Pack">\n''\t<locations location_id_counter="1">\n\t\t<locations/>\n''\t</locations>\n</playlist>\n')
+ (d/"script.lua").write_text('loud = property.checkbox("Loud")\n')
+ run_cli("add-addon","testsave","Bare Pack","--no-backup")
+ run_cli("settings","testsave","Bare Pack","--no-backup","--set","Loud=on")
+ text=(d/"script.lua").read_text()
+ assert'property.checkbox("Loud", "true")'in text
+ assert[p.label for p in properties.parse_schema(text)]==["Loud"]
+def test_commented_out_properties_are_ignored(sw_root):
+ from swam import properties
+ src=('-- old = property.slider("Ghost", 1, 10, 1, 5)\n''--[[ dead = property.checkbox("Buried") ]]\n''real = property.checkbox("Real", "false")\n')
+ assert[p.label for p in properties.parse_schema(src)]==["Real"]
