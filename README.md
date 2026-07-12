@@ -40,6 +40,13 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
   game never stores those values itself: scripts read the defaults from
   their own text on every load and snapshot some of them into the save.
   SWAM edits both.
+- **Apply your own edits to an addon** - move one of its buildings, delete
+  one, change a spawn point. Edit the files in `data/missions`, then
+  `refresh`: the old structures come out and the world is rebuilt from your
+  version. SWAM keeps a copy of each addon's playlist as it was when the
+  structures were spawned, so your edits do not blind it.
+- **Remove built-in (vanilla) addons**, the way you would any other, which
+  is what you want when you are replacing one with a workshop version.
 - **Keep you safe**: every operation makes a backup first, rolls back on
   failure, refuses to run while the game is open, and an integrity check
   (`verify`) can audit everything afterwards.
@@ -52,7 +59,7 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
   pattern.
 - Addons that were already in the save before SWAM ("inherited") have no
   ownership records anywhere - removing *their* structures uses careful
-  coordinate matching (exact spawn-point positions with a small physics
+  coordinate matching (spawn-point positions with a small physics
   tolerance, only on vehicles and objects the game itself marks as
   addon-spawned, and never on anything the companion's journal attributes
   to a different addon),
@@ -60,6 +67,15 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
   the past. For those there is a manual fallback: stand next to the
   structure in game, type `?swam mark` in chat, save - and SWAM removes it
   (and, optionally, every identical copy on the map).
+- Coordinate matching cannot tell apart identical structures that sit at
+  the same spot on *different* tiles: a spawn point is recorded relative to
+  its tile, and the map reuses tiles. When that happens SWAM says so and
+  leaves them alone rather than guess. In practice this only shows up on a
+  few vanilla addons.
+- Addon settings that a script never stores in the save can only be changed
+  for *every* save using that copy of the addon, not for one world. The
+  game keeps no per-save record of them, so there is nothing to edit.
+  SWAM labels which is which.
 - Indirect traces (money you earned from an addon's missions, loot you
   picked up) stay. SWAM is a manager, not a time machine.
 
@@ -132,7 +148,15 @@ is enough.
    values marked *default* live in the addon's local files and are read
    fresh on every world load (by every save using that copy). Changes
    apply from the next world load.
-9. **Remove marked…** is the manual fallback for structures nothing else
+9. **Refresh from files** is for editing an addon yourself: move one of its
+   buildings, delete one, change a spawn point. Edit
+   `data/missions/<addon>`, press the button, load the world. **Clean
+   leftovers…** is for buildings still standing after an addon you already
+   removed.
+10. **Help** explains every button and walks through the usual jobs
+   (adding and removing mods and addons, updating from the workshop,
+   applying your own edits, replacing a vanilla addon with a workshop one).
+11. **Remove marked…** is the manual fallback for structures nothing else
    can attribute: in game, stand next to the offending structure, type
    `?swam mark` in chat, save the game, close it - then click the button.
    SWAM removes the marked structure and (optionally) every identical
@@ -162,6 +186,8 @@ swam upgrade-addon <save> <name>    # refresh from workshop, or with
                                     # restores the workshop version)
 swam settings <save> <name>         # view addon settings
 swam settings <save> <name> --set "Label=value"   # change them
+swam refresh <save> <name>          # you edited the addon's files by hand:
+                                    # rebuild its structures from your version
 swam cleanup <save> <name>          # despawn an addon's leftover structures
                                     # (works even after the addon was removed)
 swam remove-marked <save> [--all]   # despawn structures marked in game
@@ -265,6 +291,15 @@ addons it manages (fully guaranteed clean removal) from inherited ones
 (best-effort, with explicit `--force` consent), and how `status` knows an
 update is available - it compares the content digest of your local copy
 against the subscribed workshop version.
+
+### The playlist snapshots
+
+`~/.local/share/swam/world/<save>/<addon>.xml` is a copy of each attached
+addon's playlist as it was when its structures went into the world. It
+exists so that your own edits to an addon do not blind SWAM: the structures
+standing in the world sit at the *old* coordinates, so that is the version
+it has to match them against. Without it you would have to edit the files
+after asking for a refresh rather than before, which is backwards.
 
 ### Verified against the real thing
 

@@ -33,21 +33,31 @@ def playlist_signatures(playlist_xml:Path,kind:str="vehicle")->set[tuple]:
    out|=sigs
  return out
 def _read_signatures(playlist_xml:Path)->dict[str,set]:
- text=playlist_xml.read_text(errors="replace")
+ whole=playlist_xml.read_text(errors="replace")
  sigs:dict[str,set]={}
- for c in re.finditer(r'<c component_type="(\d+)"[^>]*>(.*?)</c>',text,re.S):
-  ctype,body=c.group(1),c.group(2)
-  tr=re.search(r"<spawn_transform ([^/]*)/>",body)
-  if not tr:
+ for l in re.finditer(r"<l ([^>]*)>(.*?)</l>",whole,re.S):
+  head,text=l.group(1),l.group(2)
+  tile=re.search(r'tile="([^"]*)"',head)
+  if not tile or not tile.group(1):
    continue
-  a=dict(re.findall(r'(\d+)="([-\d.eE]+)"',tr.group(1)))
-  if"30"not in a:
-   continue
-  off={"x":0.0,"y":0.0,"z":0.0}
-  om=re.search(r"<spawn_local_offset ([^/]*)/>",body)
-  if om:
-   off.update({k:float(v)for k,v in re.findall(r'([xyz])="([-\d.eE]+)"',om.group(1))})
-  sigs.setdefault(ctype,set()).add(_sig(float(a["30"])+off["x"],float(a.get("31",0))+off["y"],float(a.get("32",0))+off["z"]))
+  for c in re.finditer(r'<c component_type="(\d+)"[^>]*>(.*?)</c>',text,re.S):
+   ctype,body=c.group(1),c.group(2)
+   tr=re.search(r"<spawn_transform ([^/]*)/>",body)
+   if not tr:
+    continue
+   a=dict(re.findall(r'(\d+)="([-\d.eE]+)"',tr.group(1)))
+   if"30"not in a:
+    continue
+   m={f"{r}{c2}":float(a.get(f"{r}{c2}",1.0 if r==c2 else 0.0))for r in range(4)for c2 in range(4)}
+   off={"x":0.0,"y":0.0,"z":0.0}
+   om=re.search(r"<spawn_local_offset ([^/]*)/>",body)
+   if om:
+    off.update({k:float(v)for k,v in re.findall(r'([xyz])="([-\d.eE]+)"',om.group(1))})
+   ox,oy,oz=off["x"],off["y"],off["z"]
+   x=ox*m["00"]+oy*m["10"]+oz*m["20"]+m["30"]
+   y=ox*m["01"]+oy*m["11"]+oz*m["21"]+m["31"]
+   z=ox*m["02"]+oy*m["12"]+oz*m["22"]+m["32"]
+   sigs.setdefault(ctype,set()).add(_sig(x,y,z))
  return sigs
 def scene_groups(scene_text:str)->list[dict]:
  i=scene_text.find("<vehicle_group_data")
@@ -97,9 +107,7 @@ def match_objects(scene_text:str,target:set,tolerance:float=TOLERANCE,owned_else
   if not o["attested"]:
    warnings.append(f"object {o['id']} sits on a spawn point but the game "f"does not mark it as addon-spawned - leaving it alone")
    continue
-  if len(near)>1:
-   continue
-  claims.setdefault(near[0],[]).append(o["id"])
+  claims.setdefault(min(near,key=lambda t:_dist(t,_sig(*o["pos"]))),[]).append(o["id"])
  oids=[]
  for t,ids in claims.items():
   oids.extend(ids)
@@ -111,25 +119,31 @@ def addon_attested(scene_text:str)->set[int]:
   if(('is_mission="true"'in attrs or"addon_tags="in attrs)and re.search(r"<authors\s*/>",m.group(3))):
    ok.add(int(m.group(1)))
  return ok
-def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE,owned_elsewhere:set|None=None)->tuple[list[int],list[str]]:
+def _is(value:str,addon_name:str)->bool:
  from.import addons
+ return addons.playlist_name(value)==addon_name or value.rsplit("/",1)[-1]==addon_name
+def addon_dir(addon_name:str,active_playlists:list[str]):
+ from.import addons
+ for v in active_playlists:
+  if _is(v,addon_name):
+   d=addons.playlist_dir(v)
+   if d is not None:
+    return d
+ local=paths.sw_root()/"data"/"missions"/addon_name
+ return local if(local/"playlist.xml").is_file()else None
+def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE,owned_elsewhere:set|None=None,target_playlist:Path|None=None)->tuple[list[int],list[str]]:
  warnings=[]
  owned_elsewhere=owned_elsewhere or set()
- target_dir=None
- for v in active_playlists:
-  if addons.playlist_name(v)==addon_name:
-   target_dir=addons.playlist_dir(v)
-   break
- if target_dir is None:
-  local=paths.sw_root()/"data"/"missions"/addon_name
-  if(local/"playlist.xml").is_file():
-   target_dir=local
- if target_dir is None:
-  raise SystemExit(f"no playlist.xml found for '{addon_name}' - without its files "f"there is nothing to match the structures against")
- target=playlist_signatures(target_dir/"playlist.xml","vehicle")
+ if target_playlist is None:
+  target_dir=addon_dir(addon_name,active_playlists)
+  if target_dir is None:
+   raise SystemExit(f"no playlist.xml found for '{addon_name}' - without its files "f"there is nothing to match the structures against")
+  target_playlist=target_dir/"playlist.xml"
+ from.import addons
+ target=playlist_signatures(target_playlist,"vehicle")
  others:set[tuple]=set()
  for v in active_playlists:
-  if addons.playlist_name(v)==addon_name:
+  if _is(v,addon_name):
    continue
   d=addons.playlist_dir(v)
   if d is not None:
@@ -150,10 +164,7 @@ def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:flo
   if not all(v in attested for v in g["vehicles"]):
    warnings.append(f"group {g['group_id']} sits on a spawn point "f"but the game does not mark it as addon-spawned "f"- leaving it alone")
    continue
-  if len(near)>1:
-   warnings.append(f"group {g['group_id']} is near several of the "f"addon's spawn points - leaving it alone")
-   continue
-  claims.setdefault(near[0],[]).append(g)
+  claims.setdefault(min(near,key=lambda t:_dist(t,g["sig"])),[]).append(g)
  vids=[]
  for t,groups in claims.items():
   if len(groups)>1:
@@ -161,23 +172,18 @@ def match(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:flo
    continue
   vids.extend(groups[0]["vehicles"])
  return vids,warnings
-def match_all(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE,owned_elsewhere:set|None=None)->tuple[list[int],list[int],list[str]]:
+def match_all(scene_text:str,addon_name:str,active_playlists:list[str],tolerance:float=TOLERANCE,owned_elsewhere:set|None=None,target_playlist:Path|None=None)->tuple[list[int],list[int],list[str]]:
  from.import addons
- vids,warns=match(scene_text,addon_name,active_playlists,tolerance,owned_elsewhere)
- target_dir=None
- for v in active_playlists:
-  if addons.playlist_name(v)==addon_name:
-   target_dir=addons.playlist_dir(v)
-   break
- if target_dir is None:
-  local=paths.sw_root()/"data"/"missions"/addon_name
-  target_dir=local if(local/"playlist.xml").is_file()else None
- if target_dir is None:
-  return vids,[],warns
- target=playlist_signatures(target_dir/"playlist.xml","object")
+ vids,warns=match(scene_text,addon_name,active_playlists,tolerance,owned_elsewhere,target_playlist)
+ if target_playlist is None:
+  target_dir=addon_dir(addon_name,active_playlists)
+  if target_dir is None:
+   return vids,[],warns
+  target_playlist=target_dir/"playlist.xml"
+ target=playlist_signatures(target_playlist,"object")
  others:set[tuple]=set()
  for v in active_playlists:
-  if addons.playlist_name(v)==addon_name:
+  if _is(v,addon_name):
    continue
   d=addons.playlist_dir(v)
   if d is not None:

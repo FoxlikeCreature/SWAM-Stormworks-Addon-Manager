@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog,messagebox,ttk
-from.import addons,catalog,companion,lock,mods,paths,properties,verify
+from.import addons,catalog,companion,lock,mods,paths,properties,snapshot,verify
 from.backup import Transaction
 from.scene import Scene
 BG="#2a2a2e"
@@ -17,6 +17,7 @@ MUTED="#9a9aa3"
 ACCENT="#b44dff"
 ACCENT_DIM="#8f3fd1"
 ACCENT_SOFT="#4b2a66"
+EDGE="#5a5a63"
 def apply_theme(root:tk.Tk)->None:
  style=ttk.Style(root)
  try:
@@ -45,8 +46,11 @@ def apply_theme(root:tk.Tk)->None:
  style.map("Treeview",background=[("selected",ACCENT)],foreground=[("selected","#ffffff")])
  style.configure("Treeview.Heading",background=BG,foreground=ACCENT,borderwidth=0,font=("TkDefaultFont",10,"bold"))
  style.map("Treeview.Heading",background=[("active",PANEL)])
- style.configure("Vertical.TScrollbar",background=ACCENT,troughcolor=PANEL,bordercolor=PANEL,lightcolor=ACCENT_DIM,darkcolor=ACCENT_DIM,gripcount=0,arrowcolor="#ffffff",borderwidth=0)
+ style.configure("Vertical.TScrollbar",background=ACCENT,troughcolor=PANEL,bordercolor=EDGE,lightcolor=ACCENT_DIM,darkcolor=ACCENT,gripcount=3,arrowcolor="#ffffff",borderwidth=1)
  style.map("Vertical.TScrollbar",background=[("pressed",ACCENT_DIM),("active",ACCENT)],lightcolor=[("pressed",ACCENT_DIM)],darkcolor=[("pressed",ACCENT_DIM)])
+ style.layout("Horizontal.TScale",[("Horizontal.Scale.trough",{"sticky":"nswe","children":[("Horizontal.Scale.slider",{"side":"left","sticky":""})]})])
+ style.configure("Horizontal.TScale",background=ACCENT,troughcolor=FIELD,bordercolor=EDGE,lightcolor=ACCENT_DIM,darkcolor=ACCENT,gripcount=3,borderwidth=1,sliderthickness=16,sliderlength=26)
+ style.map("Horizontal.TScale",background=[("pressed",ACCENT_DIM),("active","#c86bff")])
  style.configure("TNotebook",background=BG,borderwidth=0)
  style.configure("TNotebook.Tab",background=PANEL,foreground=MUTED,padding=(14,6),borderwidth=0)
  style.map("TNotebook.Tab",background=[("selected",ACCENT),("active",ACCENT_DIM)],foreground=[("selected","#ffffff"),("active","#ffffff")])
@@ -244,6 +248,80 @@ class Picker(tk.Toplevel):
    self.result=picked
   if self.result:
    self.destroy()
+HELP=[
+ ("h1","Before anything else"),
+ ("","Close Stormworks. SWAM will not touch a save while the game is running, because the game rewrites the whole save when it saves and your changes would be lost."),
+ ("","Some operations cannot be done from outside the game: spawning a building, removing one. Those are handed to the companion addon, which does them inside the game. Whenever SWAM says a task is queued, do this:"),
+ ("step","1. Load the save."),
+ ("step","2. Wait a few seconds for the chat line \"[SWAM] tasks done\"."),
+ ("step","3. Save the game. That is the moment the world actually changes."),
+ ("","If you quit without saving, nothing happened and the task simply runs again next time."),
+ ("h1","The buttons"),
+ ("h2","Add addon..."),
+ ("","Opens a catalog of your workshop subscriptions, local files and the game's built-in content. Attaches the addon to the save and, if it places buildings, queues them for spawning."),
+ ("h2","Add mod..."),
+ ("","Attaches a mod (meshes, tiles, shaders). Mods need no in-game work, they take effect on the next game launch."),
+ ("h2","Remove selected"),
+ ("","Detaches whatever you picked in the list. Works on mods, addons and built-in (vanilla) addons. For addons it also offers to remove the structures they placed in the world."),
+ ("h2","Upgrade selected"),
+ ("","Refreshes an addon SWAM installed: takes the newer workshop version, removes the old structures and spawns the new ones. If you edited the local copy yourself, it asks which side wins."),
+ ("h2","Settings..."),
+ ("","The sliders and checkboxes the game only shows when you create a world. Values marked \"per-save\" live in this save. Values marked \"default\" live in the addon's files and apply to every save using them. Takes effect on the next world load."),
+ ("h2","Refresh from files"),
+ ("","For when you want to edit an addon yourself: move a building, delete one, change a spawn point. Edit its files in data/missions, press this, then load the world."),
+ ("h2","Clean leftovers..."),
+ ("","For an addon you already removed whose buildings are still standing. Finds them by their spawn coordinates and queues them for removal."),
+ ("h2","Remove marked..."),
+ ("","The last resort for a structure nothing else can attribute. In game, stand next to it, type \"?swam mark\" in chat, save, close the game, then press this. It can also remove every identical copy of that structure on the map. Things you built yourself are never touched: SWAM only accepts structures the game itself marks as addon-spawned, with no author list."),
+ ("h2","Install companion"),
+ ("","Puts SWAM's agent into the save. One button, once per save. Without it an addon can be attached, but its buildings will not appear."),
+ ("h2","Check integrity"),
+ ("","Audits the save: script entries, state files, the lock file. Run it if something feels off."),
+ ("h2","Restore backup..."),
+ ("","Rolls the save back. SWAM makes a backup before every change, so there is always something to roll back to."),
+ ("h1","Colors in the list"),
+ ("","Green is SWAM's companion. Amber means a newer workshop version is available. Violet is built-in (vanilla) content that shipped with the game."),
+ ("h1","Workflow: add a mod"),
+ ("step","1. Add mod..., pick it."),
+ ("step","2. Start the game. That is all, mods need nothing else."),
+ ("h1","Workflow: remove a mod"),
+ ("step","1. Select it, Remove selected."),
+ ("","A tile mod is worth a thought first: it changes the ground, and anything you built on that ground may end up floating or buried."),
+ ("h1","Workflow: add an addon"),
+ ("step","1. Install companion, if the save has none."),
+ ("step","2. Add addon..., pick it."),
+ ("step","3. Load the save, wait for \"[SWAM] tasks done\", save."),
+ ("","Its buildings appear on that load. An addon that only sets itself up when a world is created may not work properly in an old save. SWAM reads its script and warns you when it sees that."),
+ ("h1","Workflow: remove an addon"),
+ ("step","1. Select it, Remove selected."),
+ ("step","2. Say yes to removing its structures when asked."),
+ ("step","3. Load the save, wait for \"[SWAM] tasks done\", save."),
+ ("","For an addon SWAM installed, removal is exact: the companion wrote down everything it spawned. For an addon that came with the world there is no such record, so SWAM matches structures by their spawn coordinates. That covers placed buildings, not things the addon's script spawned later. Anything it cannot attribute with confidence is left alone, and it will tell you so."),
+ ("h1","Workflow: update an addon from the workshop"),
+ ("step","1. An amber row means a new version is waiting."),
+ ("step","2. Select it, Upgrade selected."),
+ ("step","3. Load the save, wait for \"[SWAM] tasks done\", save."),
+ ("","Old structures out, new ones in, one world load. Your settings for that addon are re-applied afterwards."),
+ ("h1","Workflow: apply your own edits to an addon"),
+ ("","Editing playlist.xml alone does nothing to a world that already exists: the buildings are already in the save, and the addon's files are only read when a world is created. So the old ones have to go and the new ones have to be spawned."),
+ ("step","1. Edit data/missions/<addon>: move a building, delete a location, whatever you wanted."),
+ ("step","2. Select the addon, Refresh from files."),
+ ("step","3. Load the save, wait for \"[SWAM] tasks done\", save."),
+ ("","Your edits move the buildings out from under SWAM's feet, so it keeps its own copy of each addon's playlist as it was when the structures went into the world, and finds the old ones with that. It tells you when it is doing so."),
+ ("h1","Workflow: replace a built-in addon with a workshop one"),
+ ("step","1. Select the built-in (violet) row, Remove selected."),
+ ("step","2. Say yes when asked about its structures."),
+ ("step","3. Add addon..., pick the workshop version."),
+ ("step","4. Load the save, wait for \"[SWAM] tasks done\", save."),
+ ("","Removing built-in content is safe in the sense that the save simply stops loading it, and its files stay in the game folder, so you can always put it back. Just know what you are taking out: mission zones feed the mission system, the AI addons drive NPC crews, cargo runs on its own addon."),
+ ("h1","Workflow: buildings left behind"),
+ ("","If an addon is gone from the list but its buildings still stand:"),
+ ("step","1. Clean leftovers..., pick the addon."),
+ ("step","2. Load the save, wait for \"[SWAM] tasks done\", save."),
+ ("","If even that does not find a particular structure, mark it by hand: stand next to it in game, type \"?swam mark\", save, close the game, then Remove marked..."),
+ ("h1","If something goes wrong"),
+ ("","Restore backup... takes the save back to how it was before the last change. Backups are kept per save, and the one you restore from is never deleted to make room. Check integrity tells you whether the save still adds up."),
+]
 class App(ttk.Frame):
  def __init__(self,root:tk.Tk):
   super().__init__(root,padding=8)
@@ -291,7 +369,7 @@ class App(ttk.Frame):
   btns=ttk.Frame(self)
   btns.pack(fill="x",pady=8)
   self.buttons=[]
-  for text,cmd in(("Add addon…",self.add_addon),("Add mod…",self.add_mod),("Remove selected",self.remove_selected),("Upgrade selected",self.upgrade_selected),("Settings…",self.addon_settings),("Remove marked…",self.remove_marked),("Install companion",self.install_companion),("Check integrity",self.run_verify),("Restore backup…",self.restore_backup)):
+  for text,cmd in(("Add addon…",self.add_addon),("Add mod…",self.add_mod),("Remove selected",self.remove_selected),("Upgrade selected",self.upgrade_selected),("Settings…",self.addon_settings),("Refresh from files",self.refresh_addon),("Clean leftovers…",self.clean_leftovers),("Remove marked…",self.remove_marked),("Install companion",self.install_companion),("Check integrity",self.run_verify),("Restore backup…",self.restore_backup),("Help",self.show_help)):
    b=ttk.Button(btns,text=text,command=cmd)
    b.pack(side="left",padx=(0,6))
    self.buttons.append(b)
@@ -397,6 +475,7 @@ class App(ttk.Frame):
   for w in scene.list_mods():
    desc=mods.describe_wine_path(w)
    self.tree.insert("","end",values=("mod",desc,""),tags=("mod",w))
+  snapshot.sync(name,scene.list_playlists())
   scripted_paths={s["path"]for s in scene.list_scripts()}
   for v in scene.list_playlists():
    if v.startswith("rom/data/missions/"):
@@ -417,8 +496,11 @@ class App(ttk.Frame):
    self.tree.insert("","end",values=("addon",aname,", ".join(marks)),tags=("addon",aname))
   for v in scene.list_playlists():
    if v.startswith("rom/data/missions/"):
-    aname=v.rsplit("/",1)[-1]
-    self.tree.insert("","end",values=("addon",aname,"built-in (vanilla)"),tags=("builtin",aname))
+    aname=addons.playlist_name(v)or v.rsplit("/",1)[-1]
+    marks=["built-in (vanilla)"]
+    if v[4:]in scripted_paths:
+     marks.append("scripted")
+    self.tree.insert("","end",values=("addon",aname,", ".join(marks)),tags=("builtin",aname))
   comp=companion.is_installed(scene)
   self.companion_lbl.configure(text="companion: installed"if comp else"companion: NOT installed",style="Good.TLabel"if comp else"Bad.TLabel")
   self._check_updates_async(name,dict(lk["addons"]))
@@ -455,7 +537,7 @@ class App(ttk.Frame):
      vals[2]+=f" - {labels[tags[1]]}"
     self.tree.item(iid,values=vals,tags=(*tags,"update"))
  def _remove_batch(self,save:str,sel):
-  mods_,managed_,inherited_,skipped=[],[],[],[]
+  mods_,managed_,inherited_,builtin_,skipped=[],[],[],[],[]
   lk=lock.load(save)
   for iid in sel:
    kind,ident=self.tree.item(iid,"tags")[:2]
@@ -463,6 +545,8 @@ class App(ttk.Frame):
     mods_.append(ident)
    elif kind=="addon":
     (managed_ if ident in lk["addons"]else inherited_).append(ident)
+   elif kind=="builtin":
+    builtin_.append(ident)
    else:
     skipped.append(ident)
   lines=[]
@@ -472,24 +556,30 @@ class App(ttk.Frame):
    lines.append(f"{len(managed_)} addon(s) installed by SWAM")
   if inherited_:
    lines.append(f"{len(inherited_)} inherited addon(s)")
+  if builtin_:
+   lines.append(f"{len(builtin_)} built-in addon(s)")
   if not lines:
    messagebox.showinfo("SWAM","Nothing removable selected.")
    return
   if not messagebox.askyesno("SWAM","Remove "+", ".join(lines)+"?"):
    return
-  force=False
+  geo=False
   if inherited_:
-   force=messagebox.askyesno("SWAM",f"{len(inherited_)} of those came with the world "f"(inherited). Their entries can be removed, but structures "f"spawned at world creation stay.\n\nRemove them too?")
-   if not force:
+   if not messagebox.askyesno("SWAM",f"{len(inherited_)} of those came with the world "f"(inherited). Their entries can be removed, but structures "f"spawned at world creation stay.\n\nRemove them too?"):
     inherited_=[]
+  if builtin_:
+   geo=messagebox.askyesno("SWAM",f"{len(builtin_)} of those are built-in (vanilla) content. The save "f"stops loading them; their files stay in the game's folder, so "f"you can add them back from the Built-in tab.\n\n"f"Also remove the structures they placed in the world?\n\n"f"Yes - if you are replacing them with a workshop version\n"f"No - keep the structures, drop only the addon")
+  if not(mods_ or managed_ or inherited_ or builtin_):
+   return
   def op():
    from.cli import cmd_remove_addon,cmd_remove_mod
    for s in skipped:
-    print(f"skipped (companion/built-in): {s}")
+    print(f"skipped (companion): {s}")
    self._batch(mods_,lambda i:cmd_remove_mod(_Args(save=save,mod=i.replace("\\","/").rsplit("/",1)[-1],dry_run=False,no_backup=False)))
    self._batch(managed_,lambda i:cmd_remove_addon(_Args(save=save,addon=i,dry_run=False,no_backup=False,force=False,force_geometry=False)))
    self._batch(inherited_,lambda i:cmd_remove_addon(_Args(save=save,addon=i,dry_run=False,no_backup=False,force=True,force_geometry=False)))
-  self.run_op(f"remove {len(mods_)+len(managed_)+len(inherited_)} "f"item(s)",op,done=self._needs_game_note if(managed_ or inherited_)else None)
+   self._batch(builtin_,lambda i:cmd_remove_addon(_Args(save=save,addon=i,dry_run=False,no_backup=False,force=True,force_geometry=geo)))
+  self.run_op(f"remove {len(mods_)+len(managed_)+len(inherited_)+len(builtin_)} "f"item(s)",op,done=self._needs_game_note if(managed_ or inherited_ or builtin_)else None)
  def upgrade_selected(self):
   save=self.current_save()
   sel=self.tree.selection()
@@ -554,6 +644,85 @@ class App(ttk.Frame):
    from.cli import cmd_remove_marked
    cmd_remove_marked(_Args(save=save,all=bool(ans),dry_run=False,no_backup=False))
   self.run_op("remove marked",op,done=self._needs_game_note)
+ def show_help(self):
+  dlg=tk.Toplevel(self.root)
+  dlg.title("SWAM - help")
+  dlg.configure(bg=BG)
+  dlg.transient(self.root)
+  dlg.geometry("760x620")
+  dlg.minsize(560,400)
+  row=ttk.Frame(dlg,padding=(12,0,12,12))
+  row.pack(side="bottom",fill="x")
+  frame=ttk.Frame(dlg,padding=12)
+  frame.pack(side="top",fill="both",expand=True)
+  txt=tk.Text(frame,wrap="word",bg=PANEL,fg=FG,relief="flat",highlightthickness=0,padx=14,pady=12,spacing1=2,spacing3=4,cursor="arrow")
+  vsb=ttk.Scrollbar(frame,orient="vertical",command=txt.yview)
+  txt.configure(yscrollcommand=vsb.set)
+  vsb.pack(side="right",fill="y")
+  txt.pack(side="left",fill="both",expand=True)
+  txt.tag_configure("h1",foreground=ACCENT,font=("TkDefaultFont",13,"bold"),spacing1=14,spacing3=6)
+  txt.tag_configure("h2",foreground=FG,font=("TkDefaultFont",10,"bold"),spacing1=8)
+  txt.tag_configure("dim",foreground=MUTED)
+  txt.tag_configure("step",lmargin1=16,lmargin2=32)
+  for kind,line in HELP:
+   txt.insert("end",line+"\n",kind)
+  txt.configure(state="disabled")
+  for seq,d in(("<Button-4>",-1),("<Button-5>",1)):
+   txt.bind(seq,lambda e,d=d:txt.yview_scroll(d*2,"units"))
+  ttk.Button(row,text="Close",style="Accent.TButton",command=dlg.destroy).pack(side="right")
+ def refresh_addon(self):
+  save=self.current_save()
+  sel=self.tree.selection()
+  if not save or not sel:
+   messagebox.showinfo("SWAM","Select an addon whose files you want to edit by hand.")
+   return
+  kind,ident=self.tree.item(sel[0],"tags")[:2]
+  if kind not in("addon","builtin"):
+   messagebox.showinfo("SWAM","Select an addon, not a mod.")
+   return
+  if not messagebox.askyesno("SWAM",f"Refresh '{ident}' from its files in data/missions?\n\n""Everything it placed in the world is removed and spawned again ""from its playlist, so your hand-edits to that playlist (moving a ""building, deleting one) take effect in this save.\n\n""Edit the files first, then press this. SWAM keeps a copy of the ""playlist as it was when the structures were spawned, so it still ""knows where to find them."):
+   return
+  def op():
+   from.cli import cmd_refresh
+   cmd_refresh(_Args(save=save,addon=ident,dry_run=False,no_backup=False))
+  self.run_op(f"refresh {ident}",op,done=self._needs_game_note)
+ def clean_leftovers(self):
+  save=self.current_save()
+  if not save:
+   return
+  try:
+   attached={addons.playlist_name(v)for v in Scene(paths.save_dir(save)/"scene.xml").list_playlists()}
+  except(SystemExit,OSError)as e:
+   messagebox.showinfo("SWAM",str(e))
+   return
+  gone=sorted(d.name for d in(paths.sw_root()/"data"/"missions").iterdir()if(d/"playlist.xml").is_file()and d.name not in attached)
+  if not gone:
+   messagebox.showinfo("SWAM","Every addon whose files are in data/missions is still attached ""to this save - there is nothing to clean up.\n\nThis button is ""for structures left behind by an addon you already removed.")
+   return
+  pick=self._pick_one("Clean leftovers","An addon that is no longer attached to this save, but whose ""structures may still stand in the world:",gone)
+  if pick is None:
+   return
+  def op():
+   from.cli import cmd_cleanup
+   cmd_cleanup(_Args(save=save,addon=pick,dry_run=False,no_backup=False))
+  self.run_op(f"cleanup {pick}",op,done=self._needs_game_note)
+ def _pick_one(self,title:str,text:str,items:list[str])->str|None:
+  dlg=tk.Toplevel(self)
+  dlg.title(title)
+  dlg.configure(bg=BG)
+  dlg.transient(self)
+  dlg.grab_set()
+  ttk.Label(dlg,text=text,wraplength=420,justify="left").pack(anchor="w",padx=12,pady=(12,6))
+  var=tk.StringVar(value=items[0])
+  box=ttk.Combobox(dlg,textvariable=var,values=items,state="readonly",width=48)
+  box.pack(fill="x",padx=12)
+  out:list[str]=[]
+  row=ttk.Frame(dlg)
+  row.pack(fill="x",padx=12,pady=12)
+  ttk.Button(row,text="Cancel",command=dlg.destroy).pack(side="right")
+  ttk.Button(row,text="Clean",style="Accent.TButton",command=lambda:(out.append(var.get()),dlg.destroy())).pack(side="right",padx=(0,8))
+  self.wait_window(dlg)
+  return out[0]if out else None
  def addon_settings(self):
   save=self.current_save()
   sel=self.tree.selection()
@@ -585,11 +754,11 @@ class App(ttk.Frame):
   dlg.configure(bg=BG)
   dlg.transient(self.root)
   dlg.grab_set()
-  dlg.geometry("640x520")
-  dlg.minsize(520,320)
+  dlg.geometry("720x520")
+  dlg.minsize(600,320)
   canvas=tk.Canvas(dlg,bg=BG,highlightthickness=0)
   vsb=ttk.Scrollbar(dlg,orient="vertical",command=canvas.yview)
-  inner=ttk.Frame(canvas,padding=12)
+  inner=ttk.Frame(canvas,padding=(12,12,28,12))
   inner_id=canvas.create_window((0,0),window=inner,anchor="nw")
   canvas.configure(yscrollcommand=vsb.set)
   canvas.pack(side="top",fill="both",expand=True)
@@ -620,12 +789,17 @@ class App(ttk.Frame):
    else:
     var=tk.StringVar(value=str(cur))
     ttk.Entry(inner,textvariable=var,width=24).grid(row=row,column=1,sticky="e")
-   src="per-save"if p.saved_value is not None else"default"
+   if p.saved_value is None:
+    src="all saves"
+   elif properties._num(p.clamp(p.saved_value))!=properties._num(p.clamp(p.default)):
+    src=f"this save (files: {properties._num(p.clamp(p.default))})"
+   else:
+    src="this save"
    lbl=ttk.Label(inner,text=src)
    lbl.configure(foreground=MUTED)
    lbl.grid(row=row,column=2,sticky="e",padx=(10,0))
    controls[p.label]=(p,var)
-  note=ttk.Label(dlg,padding=(12,6),wraplength=600,justify="left",text="\"per-save\" values live in this save. \"default\" values ""live in the addon's local files and are read by every save ""using it, on each world load.")
+  note=ttk.Label(dlg,padding=(12,6),wraplength=600,justify="left",text="\"this save\" means the addon wrote the value into this save when ""the world was made, so changing it here changes this world (and ""the addon's own default, so new worlds start the same). ""\"all saves\" means the value only lives in the addon's files and ""every save using them reads it on each world load.")
   note.configure(foreground=MUTED)
   note.pack(fill="x")
   row_f=ttk.Frame(dlg,padding=(12,0,12,12))
@@ -714,9 +888,6 @@ class App(ttk.Frame):
     cmd_uninstall_companion(_Args(save=save,really=True,dry_run=False,no_backup=False))
    self.run_op("uninstall companion",op)
    return
-  if kind=="builtin":
-   messagebox.showinfo("SWAM","This is a built-in (vanilla) addon. Removing those is not ""supported yet - it needs separate handling of rom paths.")
-   return
   if kind=="mod":
    if not messagebox.askyesno("SWAM",f"Detach mod?\n\n{values[1]}"):
     return
@@ -728,7 +899,11 @@ class App(ttk.Frame):
   lk=lock.load(save)
   managed=ident in lk["addons"]
   force=geometry=False
-  if not managed:
+  if kind=="builtin":
+   if not messagebox.askyesno("SWAM",f"Remove built-in addon '{ident}'?\n\nThe save stops loading it. "f"Its files stay in the game's folder, so you can add it back "f"from the Built-in tab at any time."):
+    return
+   geometry=messagebox.askyesno("SWAM","Also remove the structures it placed in the world?\n\n""Yes - if you are replacing it with a workshop version\n""No - keep the structures, drop only the addon")
+  elif not managed:
    if not messagebox.askyesno("SWAM",f"'{ident}' was not installed by SWAM (it came with the "f"world).\n\nIts entries can be removed, but structures "f"it spawned at world creation stay unless matched by "f"coordinates.\n\nRemove it anyway?"):
     return
    force=True

@@ -105,11 +105,20 @@ def attached_value(scene,addon_name:str)->str|None:
    continue
   if playlist_name(v)==addon_name:
    return v
+ for v in values:
+  if not v.startswith("rom/data/missions/"):
+   continue
+  if playlist_name(v)==addon_name or v.rsplit("/",1)[-1]==addon_name:
+   return v
  return None
+def is_builtin(value:str)->bool:
+ return value.startswith("rom/data/missions/")
 def find_script_entry(scene,addon_name:str,playlist_value:str):
  for s in scene.list_scripts():
   p=s["path"]
   if p==playlist_value:
+   return True,p
+  if s["store"]==1 and f"rom/{p}"==playlist_value:
    return True,p
   if s["store"]==3:
    wine=p.replace("\\","/")

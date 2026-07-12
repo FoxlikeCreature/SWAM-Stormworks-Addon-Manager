@@ -172,6 +172,57 @@ def test_geometry_offset_settling_and_player_protection(sw_root):
  player_spot=GEO_SCENE.replace('id="60" vehicle_group_id="8"','id="60" vehicle_group_id="8" ''is_mission="true"').replace('30="8010.0" 31="11.5" 32="9020.0"','30="7010.0" 31="11.5" 32="7020.0"')
  vids,warns=geometry.match(player_spot,"Tower Pack",[])
  assert 60 not in vids,"authored vehicles must never match"
+ROTATED_PLAYLIST=('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Rot Pack">\n''\t<locations location_id_counter="3">\n\t\t<locations>\n''\t\t\t<l id="1" tile="data/tiles/t.xml" is_env_mod="true">\n''\t\t\t\t<components>\n''\t\t\t\t\t<c component_type="3" id="1">\n''\t\t\t\t\t\t<spawn_transform 00="0" 02="-1" 20="1" 22="0" ''30="100.0" 31="5.0" 32="200.0"/>\n''\t\t\t\t\t\t<spawn_local_offset x="3.25" y="-9" z="-1"/>\n''\t\t\t\t\t</c>\n''\t\t\t\t</components>\n''\t\t\t</l>\n''\t\t\t<l id="2" name="drop_off">\n''\t\t\t\t<components>\n''\t\t\t\t\t<c component_type="3" id="2">\n''\t\t\t\t\t\t<spawn_transform 30="0.0" 31="0.0" 32="0.0"/>\n''\t\t\t\t\t</c>\n''\t\t\t\t</components>\n''\t\t\t</l>\n''\t\t</locations>\n\t</locations>\n</playlist>\n')
+ROT_SCENE="""
+<vehicles>
+\t<vehicle id="50" vehicle_group_id="7" is_mission="true" is_static="true">
+\t\t<transform 30="99.0" 31="-4.0" 32="196.75"/>
+\t\t<authors/>
+\t</vehicle>
+\t<vehicle id="60" vehicle_group_id="8" is_mission="true" is_static="true">
+\t\t<transform 30="1000.0" 31="0.0" 32="0.0"/>
+\t\t<authors/>
+\t</vehicle>
+</vehicles>
+<vehicle_group_data>
+\t<group id="7">
+\t\t<vehicles><v value="50"/></vehicles>
+\t\t<initial_transform 30="99.0" 31="-4.0" 32="196.75"/>
+\t</group>
+\t<group id="8">
+\t\t<vehicles><v value="60"/></vehicles>
+\t\t<initial_transform 30="1000.0" 31="0.0" 32="0.0"/>
+\t</group>
+</vehicle_group_data>
+"""
+def test_geometry_rotated_offset_and_tileless_locations(sw_root):
+ d=sw_root/"data"/"missions"/"Rot Pack"
+ d.mkdir()
+ (d/"playlist.xml").write_text(ROTATED_PLAYLIST)
+ (d/"script.lua").write_text("")
+ from swam import geometry
+ vids,warns=geometry.match(ROT_SCENE,"Rot Pack",[])
+ assert vids==[50],("the local offset must be rotated by the spawn "f"transform, not added along world axes: {warns}")
+ assert 60 not in vids,("a location with no tile has no world coordinates - ""its components must never claim anything")
+def test_refresh_finds_structures_after_you_edited_the_playlist(sw_root):
+ d=sw_root/"data"/"missions"/"Tower Pack"
+ d.mkdir()
+ (d/"playlist.xml").write_text(TOWER_PLAYLIST)
+ (d/"script.lua").write_text("")
+ from swam import geometry,snapshot
+ snapshot.record("testsave","Tower Pack",d)
+ moved=TOWER_PLAYLIST.replace('30="10.0" 31="20.0" 32="20.875"','30="90.0" 31="20.0" 32="20.875"')
+ (d/"playlist.xml").write_text(moved)
+ vids,_=geometry.match(GEO_SCENE,"Tower Pack",[])
+ assert vids==[],"sanity: the edited playlist no longer points at the tower"
+ assert snapshot.edited("testsave","Tower Pack",d)
+ vids,warns=geometry.match(GEO_SCENE,"Tower Pack",[],target_playlist=snapshot.recorded("testsave","Tower Pack"))
+ assert vids==[50],("the tower must still be found through the playlist recorded "f"before the edit: {warns}")
+def test_builtin_addon_removal(sw_root):
+ run_cli("remove-addon","testsave","default_ai","--no-backup")
+ text=read_scene(sw_root)
+ assert'rom/data/missions/default_ai'not in text
+ assert'path="data/missions/default_ai"'not in text,("the script entry of a built-in addon is stored without the "'"rom/" prefix - it must be removed with the playlist entry, '"or the game keeps running the script")
 def test_remove_marked_with_identical_twins(sw_root):
  run_cli("install-companion","testsave","--no-backup")
  from swam import companion,paths,savedata
@@ -198,7 +249,7 @@ def test_all_modules_import_with_eager_annotations():
  import importlib
  import inspect
  import typing
- for name in("paths","scene","backup","lock","mods","addons","verify","savedata","companion","geometry","catalog","guard","interactive","cli","gui","properties"):
+ for name in("paths","scene","backup","lock","mods","addons","verify","savedata","companion","geometry","catalog","guard","interactive","cli","gui","properties","snapshot"):
   m=importlib.import_module(f"swam.{name}")
   for obj in vars(m).values():
    if inspect.isfunction(obj):

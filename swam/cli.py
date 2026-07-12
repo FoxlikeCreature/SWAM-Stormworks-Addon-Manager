@@ -1,5 +1,5 @@
 import argparse
-from.import addons,companion,geometry,lock,mods,paths,properties,verify
+from.import addons,companion,geometry,lock,mods,paths,properties,snapshot,verify
 from.backup import Transaction
 from.scene import Scene
 def cmd_saves(_args):
@@ -9,6 +9,7 @@ def cmd_saves(_args):
 def cmd_list(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
+ snapshot.sync(save.name,scene.list_playlists())
  print(f"=== mods ({args.save}) ===")
  mod_paths=scene.list_mods()
  if not mod_paths:
@@ -67,6 +68,7 @@ def cmd_add_addon(args):
   return
  with Transaction(save,f"add-addon {ref.name}",enabled=not args.no_backup)as tx:
   dest=addons.install_files(ref)
+  snapshot.record(save.name,ref.name,dest)
   scene.write()
   lk=lock.load(save.name)
   rec=lock.addon_record(ref.name,ref.playlist_value,ref.scripted,lock.file_hash(dest/"playlist.xml"),source=ref.source,world_digest=addons.world_digest(dest))
@@ -98,7 +100,11 @@ def cmd_remove_addon(args):
   raise SystemExit(f"addon '{name}' is not attached to this save")
  scripted,script_path=addons.find_script_entry(scene,name,value)
  managed=name in lk["addons"]
- if not managed and not args.force:
+ builtin=addons.is_builtin(value)
+ if builtin:
+  managed=False
+  print(f"'{name}' is built-in (vanilla) content - the save stops loading "f"it. Its files stay in the game's rom folder, so it can be added "f"back at any time")
+ if not managed and not builtin and not args.force:
   raise SystemExit(f"addon '{name}' was not installed by SWAM (inherited).\n"f"Its entries can be removed, but structures spawned at world "f"creation will remain (the companion only removes what it has "f"seen itself).\nIf that is acceptable, re-run with --force")
  scene.remove_playlist(value)
  removed_sid=scene.remove_script(script_path)if scripted else None
@@ -125,7 +131,7 @@ def cmd_remove_addon(args):
    if args.force_geometry and not managed:
     jr_all=companion.journal(save,sid)
     others={int(x)for aname,rec in jr_all.items()if aname!=name for kind in("v","o")for x in rec.get(kind,{}).values()}
-    geo_vids,geo_oids,warns=geometry.match_all(scene.text,name,scene.list_playlists()+[addons.value_for(name)],owned_elsewhere=others)
+    geo_vids,geo_oids,warns=geometry.match_all(scene.text,name,scene.list_playlists()+[value],owned_elsewhere=others,target_playlist=snapshot.recorded(save.name,name))
     for w in warns:
      print(f"  geometry: {w}")
     objects=dict(objects)
@@ -269,7 +275,7 @@ def cmd_cleanup(args):
  jr=companion.journal(save,sid)
  known_v={int(x)for rec in jr.values()for x in rec.get("v",{}).values()}
  known_o={int(x)for rec in jr.values()for x in rec.get("o",{}).values()}
- vids,oids,warns=geometry.match_all(scene.text,name,scene.list_playlists(),owned_elsewhere=known_v|known_o)
+ vids,oids,warns=geometry.match_all(scene.text,name,scene.list_playlists(),owned_elsewhere=known_v|known_o,target_playlist=snapshot.recorded(save.name,name))
  for w in warns:
   print(f"  geometry: {w}")
  vids=[v for v in vids if v not in known_v]
@@ -285,6 +291,43 @@ def cmd_cleanup(args):
  if tx.backup:
   print(f"backup: {tx.backup}")
  print(f"queued: {len(vids)} vehicles and {len(oids)} objects will be "f"despawned on next world load (save the game afterwards)")
+def cmd_refresh(args):
+ save=paths.save_dir(args.save)
+ scene=Scene(save/"scene.xml")
+ name=args.addon
+ if addons.attached_value(scene,name)is None:
+  raise SystemExit(f"addon '{name}' is not attached to this save")
+ local_dir=paths.sw_root()/"data"/"missions"/name
+ if not(local_dir/"playlist.xml").is_file():
+  raise SystemExit(f"{local_dir} has no playlist.xml - refresh works on the "f"local copy of an addon, there is nothing to spawn from")
+ sid=companion.script_id(scene)
+ if sid is None:
+  raise SystemExit("the companion is required for refresh ""(swam install-companion)")
+ jr=companion.journal(save,sid)
+ mine=jr.get(name,{})
+ known_v={int(x)for rec in jr.values()for x in rec.get("v",{}).values()}
+ known_o={int(x)for rec in jr.values()for x in rec.get("o",{}).values()}
+ as_spawned=snapshot.recorded(save.name,name)
+ if as_spawned is None:
+  print(f"note: SWAM has no record of how '{name}' looked when its "f"structures were spawned, so it matches them against the files "f"as they are now. If you have already edited them, the old "f"structures may not be found - restore the files, run this "f"again, then edit")
+ elif snapshot.edited(save.name,name,local_dir):
+  print("your edits are noticed - the old structures are matched ""against the version SWAM recorded before them")
+ vids,oids,warns=geometry.match_all(scene.text,name,scene.list_playlists(),owned_elsewhere=(known_v|known_o)-{int(x)for x in list(mine.get("v",{}).values())+list(mine.get("o",{}).values())},target_playlist=as_spawned)
+ for w in warns:
+  print(f"  geometry: {w}")
+ vids=sorted(set(vids)|{int(x)for x in mine.get("v",{}).values()})
+ oids=sorted(set(oids)|{int(x)for x in mine.get("o",{}).values()})
+ if args.dry_run:
+  print(f"(dry-run) would despawn {len(vids)} vehicles and {len(oids)} "f"objects, then respawn '{name}' from {local_dir}")
+  return
+ with Transaction(save,f"refresh {name}",enabled=not args.no_backup)as tx:
+  if vids or oids:
+   companion.queue_task(save,sid,{"action":"despawn","addon":name,"vehicles":{i+1:float(v)for i,v in enumerate(vids)},"objects":{i+1:float(o)for i,o in enumerate(oids)}})
+  companion.queue_task(save,sid,{"action":"spawn_env","addon":name})
+  snapshot.record(save.name,name,local_dir)
+ if tx.backup:
+  print(f"backup: {tx.backup}")
+ print(f"queued: {len(vids)} vehicles and {len(oids)} objects will be "f"despawned, then '{name}' will be spawned again from your files.\n"f"Load the save, wait for \"[SWAM] tasks done\", save the game.")
 def cmd_remove_marked(args):
  import hashlib
  save=paths.save_dir(args.save)
@@ -552,6 +595,12 @@ def build_parser():
  sp.add_argument("--dry-run",action="store_true")
  sp.add_argument("--no-backup",action="store_true")
  sp.set_defaults(fn=cmd_cleanup)
+ sp=sub.add_parser("refresh",help="despawn everything an addon placed in the world, ""then spawn it again from its local files - so that ""hand-edits to those files take effect in an existing ""save")
+ sp.add_argument("save")
+ sp.add_argument("addon")
+ sp.add_argument("--dry-run",action="store_true")
+ sp.add_argument("--no-backup",action="store_true")
+ sp.set_defaults(fn=cmd_refresh)
  sp=sub.add_parser("remove-marked",help="despawn structures marked in game with ""\"?swam mark\"")
  sp.add_argument("save")
  sp.add_argument("--all",action="store_true",help="also remove every identical structure on the map")
