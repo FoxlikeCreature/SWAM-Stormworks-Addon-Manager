@@ -98,6 +98,13 @@ def _dead_ranges(text:str)->list[tuple]:
  return out
 def _in_dead(pos:int,dead:list[tuple])->bool:
  return any(a<=pos<b for a,b in dead)
+def code_view(text:str)->str:
+ out=list(text)
+ for a,b in _dead_ranges(text):
+  for i in range(a,b):
+   if out[i]!="\n":
+    out[i]=" "
+ return "".join(out)
 def parse_schema(text:str)->list[Prop]:
  props:dict[str,Prop]={}
  dead=_dead_ranges(text)
@@ -132,7 +139,7 @@ def parse_schema(text:str)->list[Prop]:
   p=props.setdefault(label,p)
   if p.kind==kind:
    p.spans.append((m.start(),spans,close))
- _trace_savedata(text,props)
+ _trace_savedata(code_view(text),props)
  return list(props.values())
 def _call_span_at(props,pos):
  for p in props.values():
@@ -145,11 +152,49 @@ def _var_names(text:str,props)->dict[str,tuple]:
  for p in props.values():
   for call_start,spans,close in p.spans:
    head=text[:call_start]
-   m=re.search(r"(?:local\s+)?([A-Za-z_]\w*)\s*=\s*$",head)
-   if m and m.group(1)!="g_savedata":
+   m=re.search(r"(?:local\s+)?((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*=\s*$",head)
+   if m and not m.group(1).startswith("g_savedata"):
     scale=_scale_after(text,close)
     out[m.group(1)]=(p,scale)
  return out
+def _trace_assignments(text:str,variables:dict,props:dict)->None:
+ for m in re.finditer(r"g_savedata((?:\.[A-Za-z_]\w*)+)\s*=(?!=)\s*",text):
+  path=tuple(m.group(1).lstrip(".").split("."))
+  at=m.end()
+  for _ in range(5):
+   end=text.find("\n",at)
+   if end<0:
+    end=len(text)
+    break
+   if not re.search(r"(?:\bor\b|\band\b|[-+*/,({]|\.\.)\s*$",text[m.end():end]):
+    break
+   at=end+1
+  found=_rhs_property(text,m.end(),end,variables,props)
+  if found is None:
+   continue
+  p,scale=found
+  if p.saved_path is None:
+   p.saved_path=path
+   p.saved_scale=scale
+def _rhs_property(text:str,start:int,end:int,variables:dict,props:dict):
+ tail=start
+ for om in re.finditer(r"\bor\b",text[start:end]):
+  tail=start+om.end()
+ while tail<end and text[tail]in" \t\r\n":
+  tail+=1
+ expr=text[tail:end].strip()
+ p,call_start,close=_call_span_at(props,tail)
+ if p is not None and call_start==tail:
+  return p,_scale_after(text,close)
+ vm=re.fullmatch(r"((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)((?:\s*\*\s*[\d.]+)*)",expr)
+ if vm is None or vm.group(1)not in variables:
+  return None
+ p,scale=variables[vm.group(1)]
+ for f in vm.group(2).split("*"):
+  f=f.strip()
+  if f:
+   scale*=float(f)
+ return p,scale
 def _scale_after(text:str,close:int)->float:
  scale=1.0
  for f in re.match(r"(\s*\*\s*[\d.]+)*",text[close+1:]).group(0).split("*"):
@@ -158,14 +203,23 @@ def _scale_after(text:str,close:int)->float:
    scale*=float(f)
  return scale
 def _trace_savedata(text:str,props:dict)->None:
- m=re.search(r"g_savedata\s*=\s*{",text)
- if not m:
-  return
- spans,close=_split_args(text,m.end()-1)
- if spans is None:
-  return
  variables=_var_names(text,props)
- _trace_table(text,spans,(),variables,props,m.end())
+ m=re.search(r"g_savedata\s*=\s*{",text)
+ if m:
+  spans,close=_split_args(text,m.end()-1)
+  if spans is not None:
+   _trace_table(text,spans,(),variables,props,m.end())
+ _trace_assignments(text,variables,props)
+ _trace_readbacks(text,variables,props)
+def _trace_readbacks(text:str,variables:dict,props:dict)->None:
+ for m in re.finditer(r"(?:local\s+)?((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*=(?!=)\s*""g_savedata((?:\.[A-Za-z_]\w*)+)\s*(?:$|[^.\w(])",text,re.M):
+  name=m.group(1)
+  if name not in variables:
+   continue
+  p,scale=variables[name]
+  if p.saved_path is None:
+   p.saved_path=tuple(m.group(2).lstrip(".").split("."))
+   p.saved_scale=scale
 def _trace_table(text,entry_spans,path,variables,props,table_start):
  index=0
  for a,b in entry_spans:
@@ -305,7 +359,8 @@ def apply(save:Path,addon_name:str,scene,changes:dict[str,object])->tuple[list[s
     node[p.saved_path[-1]]=(value*p.saved_scale if p.kind=="slider"else value)
     stored+=1
     continue
-  report.append(f"'{label}': stored addon state not located - the new "f"value takes effect where the addon reads it fresh "f"(fresh installs always do)")
+  if data:
+   report.append(f"'{label}': this addon keeps state in the save, but SWAM "f"could not find this setting in it. If the addon stored it "f"there, the save wins and this change does nothing. To force "f"it, reset the addon's state (--reset-state), which makes it "f"start over from the defaults and loses what it remembered")
  original=script.read_bytes()
  text=_apply_edits(text,edits)
  try:
@@ -318,4 +373,53 @@ def apply(save:Path,addon_name:str,scene,changes:dict[str,object])->tuple[list[s
  except BaseException:
   script.write_bytes(original)
   raise
+ for label,bad in _verify(save,addon_name,scene,applied):
+  report.append(f"'{label}': WRITE DID NOT STICK - {bad}")
  return report,applied
+def _verify(save:Path,addon_name:str,scene,applied:dict):
+ bad=[]
+ fresh={p.label:p for p in read(save,addon_name,scene)}
+ for label,value in applied.items():
+  p=fresh.get(label)
+  if p is None:
+   bad.append((label,"the setting vanished from the script"))
+   continue
+  if p.clamp(p.default)!=p.clamp(value):
+   bad.append((label,f"the script default reads back as {p.default!r}"))
+  elif p.saved_value is not None and p.clamp(p.saved_value)!=p.clamp(value):
+   bad.append((label,f"this save still holds {p.saved_value!r}"))
+ return bad
+def reset_state(save:Path,addon_name:str,scene)->Path|None:
+ sid=_script_id(scene,addon_name)
+ if sid is None:
+  return None
+ sd=save/"script_data"/f"{sid}.xml"
+ if not sd.is_file():
+  return None
+ sd.unlink()
+ return sd
+def wanted(lk:dict)->dict:
+ out=dict(lk.get("settings")or{})
+ for name,rec in(lk.get("addons")or{}).items():
+  s=rec.get("settings")or{}
+  if s:
+   out.setdefault(name,{}).update(s)
+ return out
+def drift(save:Path,scene,lk:dict)->list[dict]:
+ from.import addons
+ out=[]
+ for name,want in wanted(lk).items():
+  if not want or addons.attached_value(scene,name)is None:
+   continue
+  try:
+   props={p.label:p for p in read(save,name,scene)}
+  except SystemExit:
+   continue
+  for label,value in want.items():
+   p=props.get(label)
+   if p is None:
+    continue
+   got=p.saved_value if p.saved_value is not None else p.default
+   if p.clamp(got)!=p.clamp(value):
+    out.append({"addon":name,"label":label,"want":p.clamp(value),"got":p.clamp(got),"where":"this save"if p.saved_value is not None else"the addon's files"})
+ return out

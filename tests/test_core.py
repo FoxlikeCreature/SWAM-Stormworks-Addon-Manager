@@ -218,6 +218,53 @@ def test_refresh_finds_structures_after_you_edited_the_playlist(sw_root):
  assert snapshot.edited("testsave","Tower Pack",d)
  vids,warns=geometry.match(GEO_SCENE,"Tower Pack",[],target_playlist=snapshot.recorded("testsave","Tower Pack"))
  assert vids==[50],("the tower must still be found through the playlist recorded "f"before the edit: {warns}")
+TRICKY_SCRIPT=('GLOBALS = {}\n''GLOBALS.DESPAWN = property.checkbox("Despawn on delivery", "false")\n''prop_auto = property.checkbox("Automatic", true)\n''prop_secs = property.slider("Seconds", 5, 60, 5, 10)\n''prop_mins = property.slider("Minutes", 1, 60, 1, 15)\n''function onCreate()\n''\tg_savedata.GLOBALS = g_savedata.GLOBALS or {}\n''\tg_savedata.GLOBALS.DESPAWN = g_savedata.GLOBALS.DESPAWN or\n''\t\tGLOBALS.DESPAWN\n''\tg_savedata.timeout = prop_mins * 60 * 60\n''\tif g_savedata.auto_override ~= nil then\n''\t\tprop_auto = g_savedata.auto_override\n''\tend\n''\tif g_savedata.ask == nil and low >= prop_secs * 1000 then\n''\t\tg_savedata.ask = { vid = vid, deadline = prop_secs }\n''\tend\n''end\n')
+def test_property_tracing_idioms(sw_root):
+ d=sw_root/"data"/"missions"/"Tricky"
+ d.mkdir()
+ (d/"playlist.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<playlist path_id="x" folder_path="x" file_store="4" name="Tricky">\n''\t<locations location_id_counter="1">\n\t\t<locations/>\n'"\t</locations>\n</playlist>\n")
+ (d/"script.lua").write_text(TRICKY_SCRIPT)
+ from swam import properties
+ p={x.label:x for x in properties.parse_schema(TRICKY_SCRIPT)}
+ assert p["Despawn on delivery"].saved_path==("GLOBALS","DESPAWN"),("a dotted assignment split across lines by \"or\" must be traced - "'this is the "x = x or default" idiom, where the stored value '"always wins over the script default")
+ assert p["Minutes"].saved_path==("timeout",)
+ assert p["Minutes"].saved_scale==3600.0
+ assert p["Automatic"].saved_path==("auto_override",),"a value read back out of g_savedata into the property's own ""variable is stored there too"
+ assert p["Seconds"].saved_path is None,('"g_savedata.ask == nil" is a comparison, not an assignment, and '"a table constructor that merely mentions the property is not ""where its value is kept")
+def test_settings_drift_and_reset_state(sw_root):
+ from swam import companion,lock,paths,properties,savedata
+ from swam.scene import Scene
+ run_cli("add-addon","testsave","Tuned Pack","--no-backup")
+ save=paths.save_dir("testsave")
+ scene=Scene(save/"scene.xml")
+ sid=properties._script_id(scene,"Tuned Pack")
+ sd=save/"script_data"/f"{sid}.xml"
+ savedata.save_file(sd,{"interval":15*60*60,"opts":{"loud":False}})
+ run_cli("settings","testsave","Tuned Pack","--set","Wave Interval (Mins)=30","--no-backup")
+ lk=lock.load("testsave")
+ assert properties.drift(save,scene,lk)==[],"a setting just applied cannot have drifted"
+ data=savedata.load_file(sd)
+ data["interval"]=5*60*60
+ savedata.save_file(sd,data)
+ bad=properties.drift(save,scene,lk)
+ assert len(bad)==1 and bad[0]["want"]==30 and bad[0]["got"]==5,("the save now disagrees with what SWAM applied - that is drift")
+ run_cli("reconcile","testsave","--no-backup")
+ assert properties.drift(save,Scene(save/"scene.xml"),lock.load("testsave"))==[]
+ run_cli("remove-addon","testsave","Tuned Pack","--no-backup")
+ scene=Scene(save/"scene.xml")
+ assert properties.drift(save,scene,lock.load("testsave"))==[],("an addon this save no longer uses must not be reconciled - its "
+  "files are shared with every other save")
+def test_reset_state_alone(sw_root):
+ from swam import paths,properties
+ from swam.scene import Scene
+ run_cli("add-addon","testsave","Tuned Pack","--no-backup")
+ save=paths.save_dir("testsave")
+ sid=properties._script_id(Scene(save/"scene.xml"),"Tuned Pack")
+ sd=save/"script_data"/f"{sid}.xml"
+ sd.parent.mkdir(exist_ok=True)
+ sd.write_text('<?xml version="1.0" encoding="UTF-8"?>\n''<script_data><g_savedata><t interval="1"/></g_savedata></script_data>\n',newline="")
+ run_cli("settings","testsave","Tuned Pack","--reset-state","--no-backup")
+ assert not sd.is_file(),("--reset-state on its own must delete the addon's saved state, not ""be silently ignored because no --set was given")
 def test_builtin_addon_removal(sw_root):
  run_cli("remove-addon","testsave","default_ai","--no-backup")
  text=read_scene(sw_root)

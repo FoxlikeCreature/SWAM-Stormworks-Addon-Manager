@@ -9,6 +9,18 @@ def xml_unescape(s:str)->str:
  return _unesc(s,{"&quot;":'"',"&apos;":"'"})
 def value_for(addon_name:str)->str:
  return f"data/missions/{xml_escape(addon_name)}"
+def _guard_ranges(code:str)->list[tuple]:
+ out=[]
+ for m in re.finditer(r"\bif\b([^\n]*\bis_world_create\b[^\n]*)\bthen\b",code):
+  if re.search(r"\bnot\s+is_world_create\b|is_world_create\s*==\s*false",m.group(1)):
+   continue
+  depth=1
+  for t in re.finditer(r"\b(if|for|while|function|repeat|end|until)\b",code[m.end():]):
+   depth+=1 if t.group(1)in("if","for","while","function","repeat")else-1
+   if depth<=0:
+    out.append((m.start(),m.end()+t.end()))
+    break
+ return out
 class AddonRef:
  def __init__(self,disk_path:Path):
   self.disk_path=disk_path
@@ -33,9 +45,12 @@ class AddonRef:
   s=self.disk_path/"script.lua"
   if not s.is_file():
    return None
-  text=s.read_text(errors="replace")
-  has_top_init=bool(re.search(r"^g_savedata\s*=",text,re.M))
-  uses_guard="is_world_create"in text
+  from.import properties
+  text=properties.code_view(s.read_text(errors="replace"))
+  guarded=_guard_ranges(text)
+  writes=[m.start()for m in re.finditer(r"g_savedata\s*(?:\.[A-Za-z_]\w*|\[[^\]]*\])*"r"\s*=(?!=)",text)]
+  has_top_init=any(not any(a<=w<b for a,b in guarded)for w in writes)
+  uses_guard=bool(re.search(r"\bis_world_create\b",text))
   if uses_guard and not has_top_init:
    return("this addon initializes only under is_world_create - in an ""existing save that never runs, so the addon may misbehave ""or crash. Check its behaviour after adding")
   if uses_guard:

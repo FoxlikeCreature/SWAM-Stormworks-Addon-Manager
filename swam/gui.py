@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog,messagebox,ttk
-from.import addons,catalog,companion,lock,mods,paths,properties,snapshot,verify
+from.import addons,catalog,companion,guard,lock,mods,paths,properties,snapshot,verify
 from.backup import Transaction
 from.scene import Scene
 BG="#2a2a2e"
@@ -366,6 +366,7 @@ class App(ttk.Frame):
   self.tree.tag_configure("companion",foreground="#4ade80")
   self.tree.tag_configure("update",foreground="#ffb454")
   self._update_check_running=False
+  self._drift_asked:set[str]=set()
   btns=ttk.Frame(self)
   btns.pack(fill="x",pady=8)
   self.buttons=[]
@@ -504,6 +505,7 @@ class App(ttk.Frame):
   comp=companion.is_installed(scene)
   self.companion_lbl.configure(text="companion: installed"if comp else"companion: NOT installed",style="Good.TLabel"if comp else"Bad.TLabel")
   self._check_updates_async(name,dict(lk["addons"]))
+  self._check_drift(name,scene,lk)
  def _check_updates_async(self,save_name:str,managed:dict):
   if self._update_check_running or not managed:
    return
@@ -670,6 +672,27 @@ class App(ttk.Frame):
   for seq,d in(("<Button-4>",-1),("<Button-5>",1)):
    txt.bind(seq,lambda e,d=d:txt.yview_scroll(d*2,"units"))
   ttk.Button(row,text="Close",style="Accent.TButton",command=dlg.destroy).pack(side="right")
+ def _check_drift(self,save_name:str,scene,lk:dict):
+  if guard.game_running():
+   return
+  try:
+   bad=properties.drift(paths.save_dir(save_name),scene,lk)
+  except Exception:
+   return
+  if not bad:
+   self._drift_asked.discard(save_name)
+   return
+  if save_name in self._drift_asked:
+   return
+  self._drift_asked.add(save_name)
+  lines="\n".join(f"  {d['addon']}: '{d['label']}' should be {d['want']}, "f"{d['where']} holds {d['got']}"for d in bad[:6])
+  if not messagebox.askyesno("SWAM",f"{len(bad)} setting(s) SWAM applied are not what the save and "f"the addon files actually hold now:\n\n{lines}\n\n"f"This happens when an addon keeps a setting in the save and "f"writes over the file default.\n\nPut them back?"):
+   return
+  def op():
+   from.cli import cmd_reconcile
+   cmd_reconcile(_Args(save=save_name,dry_run=False,no_backup=False))
+  self.run_op("reconcile settings",op,done=self._needs_game_note)
+
  def refresh_addon(self):
   save=self.current_save()
   sel=self.tree.selection()

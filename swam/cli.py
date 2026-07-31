@@ -328,6 +328,30 @@ def cmd_refresh(args):
  if tx.backup:
   print(f"backup: {tx.backup}")
  print(f"queued: {len(vids)} vehicles and {len(oids)} objects will be "f"despawned, then '{name}' will be spawned again from your files.\n"f"Load the save, wait for \"[SWAM] tasks done\", save the game.")
+def cmd_reconcile(args):
+ save=paths.save_dir(args.save)
+ scene=Scene(save/"scene.xml")
+ lk=lock.load(save.name)
+ bad=properties.drift(save,scene,lk)
+ if not bad:
+  print("every setting SWAM applied is still what the save and the files ""actually hold")
+  return
+ for d in bad:
+  print(f"drift: '{d['addon']}' / '{d['label']}' should be {d['want']}, "f"but {d['where']} holds {d['got']}")
+ if args.dry_run:
+  print("(dry-run) nothing was written")
+  return
+ fixed=0
+ with Transaction(save,"reconcile settings",enabled=not args.no_backup)as tx:
+  for name in sorted({d["addon"]for d in bad}):
+   changes={d["label"]:d["want"]for d in bad if d["addon"]==name}
+   report,applied=properties.apply(save,name,scene,changes)
+   for line in report:
+    print(f"  {line}")
+   fixed+=len(applied)
+ if tx.backup:
+  print(f"backup: {tx.backup}")
+ print(f"repaired {fixed} setting(s) - they apply from the next world load")
 def cmd_remove_marked(args):
  import hashlib
  save=paths.save_dir(args.save)
@@ -416,6 +440,16 @@ def cmd_settings(args):
  save=paths.save_dir(args.save)
  scene=Scene(save/"scene.xml")
  name=args.addon
+ if not args.set and args.reset_state:
+  with Transaction(save,f"reset-state {name}",enabled=not args.no_backup)as tx:
+   gone=properties.reset_state(save,name,scene)
+  if gone is None:
+   print("this addon has no saved state in this save - nothing to reset")
+   return
+  if tx.backup:
+   print(f"backup: {tx.backup}")
+  print(f"deleted {gone.name} - the addon starts over from its defaults on "f"the next world load, and whatever it had remembered is gone")
+  return
  if not args.set:
   props=properties.read(save,name,scene)
   if not props:
@@ -424,7 +458,7 @@ def cmd_settings(args):
   for p in props:
    rng=(f"  [{properties._num(p.minimum)}"f"..{properties._num(p.maximum)}"f" step {properties._num(p.step)}]"if p.kind=="slider"else"")
    cur=p.saved_value if p.saved_value is not None else p.default
-   src="save state"if p.saved_value is not None else"script default"
+   src="save state"if p.saved_value is not None else"script default (not found in this save)"
    if p.kind=="checkbox":
     cur="on"if cur else"off"
    elif p.kind=="slider":
@@ -456,7 +490,12 @@ def cmd_settings(args):
   lk=lock.load(save.name)
   if name in lk["addons"]:
    lk["addons"][name].setdefault("settings",{}).update(applied)
-   lock.store(save.name,lk)
+  lk.setdefault("settings",{}).setdefault(name,{}).update(applied)
+  lock.store(save.name,lk)
+  if getattr(args,"reset_state",False):
+   gone=properties.reset_state(save,name,scene)
+   if gone is not None:
+    print(f"deleted {gone.name} - the addon starts over from its "f"defaults on the next world load, and whatever it had "f"remembered is gone")
  if tx.backup:
   print(f"backup: {tx.backup}")
  print("done. The values apply from the next world load")
@@ -601,6 +640,11 @@ def build_parser():
  sp.add_argument("--dry-run",action="store_true")
  sp.add_argument("--no-backup",action="store_true")
  sp.set_defaults(fn=cmd_refresh)
+ sp=sub.add_parser("reconcile",help="check every setting SWAM applied against what the ""save and the addon files really hold, and put back ""the ones that drifted")
+ sp.add_argument("save")
+ sp.add_argument("--dry-run",action="store_true")
+ sp.add_argument("--no-backup",action="store_true")
+ sp.set_defaults(fn=cmd_reconcile)
  sp=sub.add_parser("remove-marked",help="despawn structures marked in game with ""\"?swam mark\"")
  sp.add_argument("save")
  sp.add_argument("--all",action="store_true",help="also remove every identical structure on the map")
@@ -611,6 +655,7 @@ def build_parser():
  sp.add_argument("save")
  sp.add_argument("addon",help="addon name")
  sp.add_argument("--set",action="append",metavar='"Label=value"',help="change a setting (repeatable)")
+ sp.add_argument("--reset-state",action="store_true",help="delete the addon's saved state so it starts over from ""the defaults - the last resort when the addon keeps a "" setting somewhere SWAM cannot find")
  sp.add_argument("--dry-run",action="store_true",help="show what would change, write nothing")
  sp.add_argument("--no-backup",action="store_true")
  sp.set_defaults(fn=cmd_settings)
