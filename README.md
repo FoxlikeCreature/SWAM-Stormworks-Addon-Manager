@@ -12,17 +12,6 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
 
 
 
-> ## About AI
-> English is not my native language, so this README was written with AI
-> assistance. The project's logic, architecture and code are mine. AI came in
-> afterwards, for the English text, the comments and general readability,
-> because I wanted the code to be easy to follow.
-> Comments and formatting were later stripped out of the shipped code, so what
-> you get is raw and unadorned. It works, and that is what the tool is for.
----
-
-
-
 ## What it can do
 
 - **Attach and detach mods** (meshes, tiles, shaders) - takes effect on the

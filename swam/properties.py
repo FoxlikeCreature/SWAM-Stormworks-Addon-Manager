@@ -1,425 +1,526 @@
 import re
 from pathlib import Path
-from.import paths,savedata
-CALL_RE=re.compile(r"property\s*\.\s*(slider|checkbox|text)\s*\(")
+from . import paths, savedata
+
+CALL_RE = re.compile(r"property\s*\.\s*(slider|checkbox|text)\s*\(")
+
+
 class Prop:
- def __init__(self,kind,label,default,minimum=None,maximum=None,step=None):
-  self.kind=kind
-  self.label=label
-  self.default=default
-  self.minimum=minimum
-  self.maximum=maximum
-  self.step=step
-  self.spans=[]
-  self.saved_path=None
-  self.saved_scale=1.0
-  self.saved_value=None
- def clamp(self,value):
-  if self.kind=="checkbox":
-   if isinstance(value,str):
-    return value.strip().lower()in("true","1","on","yes")
-   return bool(value)
-  if self.kind=="text":
-   return str(value)
-  try:
-   v=float(value)
-  except(TypeError,ValueError):
-   raise SystemExit(f"'{self.label}' is a slider - it needs a number between "f"{_num(self.minimum)} and {_num(self.maximum)}, "f"not {value!r}")
-  if self.step:
-   v=self.minimum+round((v-self.minimum)/self.step)*self.step
-  v=max(self.minimum,min(self.maximum,v))
-  return round(v,10)
-def _split_args(text:str,open_paren:int):
- depth,i,quote=1,open_paren+1,None
- start,spans=i,[]
- while i<len(text):
-  c=text[i]
-  if quote:
-   if c=="\\":
-    i+=1
-   elif c==quote:
-    quote=None
-  elif c in"'\"":
-   quote=c
-  elif c in"([{":
-   depth+=1
-  elif c in")]}":
-   depth-=1
-   if depth==0:
-    spans.append((start,i))
-    return spans,i
-  elif c==","and depth==1:
-   spans.append((start,i))
-   start=i+1
-  i+=1
- return None,None
-def _value(raw:str):
- s=raw.strip()
- if len(s)>=2 and s[0]in"'\""and s[-1]==s[0]:
-  s=s[1:-1]
- low=s.strip().lower()
- if low=="true":
-  return True
- if low=="false":
-  return False
- try:
-  return float(s)
- except ValueError:
-  return s
-def _num(v)->str:
- f=float(v)
- return str(int(f))if f==int(f)else repr(f)
-def _dead_ranges(text:str)->list[tuple]:
- out=[]
- i,n=0,len(text)
- while i<n:
-  c=text[i]
-  if c in"'\"":
-   j=i+1
-   while j<n and text[j]!=c:
-    j+=2 if text[j]=="\\"else 1
-   i=j+1
-   continue
-  if text.startswith("[[",i):
-   j=text.find("]]",i+2)
-   i=n if j==-1 else j+2
-   continue
-  if text.startswith("--",i):
-   if text.startswith("--[[",i):
-    j=text.find("]]",i+4)
-    end=n if j==-1 else j+2
-   else:
-    j=text.find("\n",i)
-    end=n if j==-1 else j
-   out.append((i,end))
-   i=end
-   continue
-  i+=1
- return out
-def _in_dead(pos:int,dead:list[tuple])->bool:
- return any(a<=pos<b for a,b in dead)
-def code_view(text:str)->str:
- out=list(text)
- for a,b in _dead_ranges(text):
-  for i in range(a,b):
-   if out[i]!="\n":
-    out[i]=" "
- return "".join(out)
-def parse_schema(text:str)->list[Prop]:
- props:dict[str,Prop]={}
- dead=_dead_ranges(text)
- for m in CALL_RE.finditer(text):
-  if _in_dead(m.start(),dead):
-   continue
-  open_paren=text.index("(",m.end()-1)
-  spans,close=_split_args(text,open_paren)
-  if spans is None or not spans:
-   continue
-  kind=m.group(1)
-  args=[_value(text[a:b])for a,b in spans]
-  label=args[0]
-  if not isinstance(label,str):
-   continue
-  try:
-   if kind=="slider":
-    if len(args)>=5:
-     mn,mx,st,df=args[1],args[2],args[3],args[4]
-    elif len(args)==4:
-     mn,mx,st,df=args[1],args[2],1.0,args[3]
-    else:
-     continue
-    p=Prop("slider",label,float(df),float(mn),float(mx),float(st))
-   elif kind=="checkbox":
-    df=args[1]if len(args)>1 else False
-    p=Prop("checkbox",label,df is True)
-   else:
-    p=Prop("text",label,str(args[1])if len(args)>1 else"")
-  except(TypeError,ValueError):
-   continue
-  p=props.setdefault(label,p)
-  if p.kind==kind:
-   p.spans.append((m.start(),spans,close))
- _trace_savedata(code_view(text),props)
- return list(props.values())
-def _call_span_at(props,pos):
- for p in props.values():
-  for call_start,spans,close in p.spans:
-   if call_start<=pos<=close:
-    return p,call_start,close
- return None,None,None
-def _var_names(text:str,props)->dict[str,tuple]:
- out={}
- for p in props.values():
-  for call_start,spans,close in p.spans:
-   head=text[:call_start]
-   m=re.search(r"(?:local\s+)?((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*=\s*$",head)
-   if m and not m.group(1).startswith("g_savedata"):
-    scale=_scale_after(text,close)
-    out[m.group(1)]=(p,scale)
- return out
-def _trace_assignments(text:str,variables:dict,props:dict)->None:
- for m in re.finditer(r"g_savedata((?:\.[A-Za-z_]\w*)+)\s*=(?!=)\s*",text):
-  path=tuple(m.group(1).lstrip(".").split("."))
-  at=m.end()
-  for _ in range(5):
-   end=text.find("\n",at)
-   if end<0:
-    end=len(text)
-    break
-   if not re.search(r"(?:\bor\b|\band\b|[-+*/,({]|\.\.)\s*$",text[m.end():end]):
-    break
-   at=end+1
-  found=_rhs_property(text,m.end(),end,variables,props)
-  if found is None:
-   continue
-  p,scale=found
-  if p.saved_path is None:
-   p.saved_path=path
-   p.saved_scale=scale
-def _rhs_property(text:str,start:int,end:int,variables:dict,props:dict):
- tail=start
- for om in re.finditer(r"\bor\b",text[start:end]):
-  tail=start+om.end()
- while tail<end and text[tail]in" \t\r\n":
-  tail+=1
- expr=text[tail:end].strip()
- p,call_start,close=_call_span_at(props,tail)
- if p is not None and call_start==tail:
-  return p,_scale_after(text,close)
- vm=re.fullmatch(r"((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)((?:\s*\*\s*[\d.]+)*)",expr)
- if vm is None or vm.group(1)not in variables:
-  return None
- p,scale=variables[vm.group(1)]
- for f in vm.group(2).split("*"):
-  f=f.strip()
-  if f:
-   scale*=float(f)
- return p,scale
-def _scale_after(text:str,close:int)->float:
- scale=1.0
- for f in re.match(r"(\s*\*\s*[\d.]+)*",text[close+1:]).group(0).split("*"):
-  f=f.strip()
-  if f:
-   scale*=float(f)
- return scale
-def _trace_savedata(text:str,props:dict)->None:
- variables=_var_names(text,props)
- m=re.search(r"g_savedata\s*=\s*{",text)
- if m:
-  spans,close=_split_args(text,m.end()-1)
-  if spans is not None:
-   _trace_table(text,spans,(),variables,props,m.end())
- _trace_assignments(text,variables,props)
- _trace_readbacks(text,variables,props)
-def _trace_readbacks(text:str,variables:dict,props:dict)->None:
- for m in re.finditer(r"(?:local\s+)?((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*=(?!=)\s*""g_savedata((?:\.[A-Za-z_]\w*)+)\s*(?:$|[^.\w(])",text,re.M):
-  name=m.group(1)
-  if name not in variables:
-   continue
-  p,scale=variables[name]
-  if p.saved_path is None:
-   p.saved_path=tuple(m.group(2).lstrip(".").split("."))
-   p.saved_scale=scale
-def _trace_table(text,entry_spans,path,variables,props,table_start):
- index=0
- for a,b in entry_spans:
-  entry=text[a:b]
-  if not entry.strip():
-   continue
-  km=re.match(r'\s*(?:([A-Za-z_]\w*)|\[\s*"([^"]*)"\s*\])\s*=\s*',entry)
-  if km:
-   key=km.group(1)or km.group(2)
-   expr_at=a+km.end()
-  else:
-   index+=1
-   key,expr_at=index,a+len(entry)-len(entry.lstrip())
-  expr=text[expr_at:b].strip()
-  tm=re.match(r"{",expr)
-  if tm:
-   sub_spans,_=_split_args(text,expr_at+expr.index("{"))
-   if sub_spans:
-    _trace_table(text,sub_spans,path+(key,),variables,props,expr_at)
-   continue
-  p,call_start,close=_call_span_at(props,expr_at)
-  if p and expr_at<=call_start<b:
-   p.saved_path=path+(key,)
-   p.saved_scale=_scale_after(text,close)
-   continue
-  vm=re.match(r"([A-Za-z_]\w*)((?:\s*\*\s*[\d.]+)*)\s*$",expr)
-  if vm and vm.group(1)in variables:
-   p,scale=variables[vm.group(1)]
-   for f in vm.group(2).split("*"):
-    f=f.strip()
-    if f:
-     scale*=float(f)
-   p.saved_path=path+(key,)
-   p.saved_scale=scale
-def _needed_args(kind:str)->int:
- return 4 if kind=="slider"else 2
-def _default_edits(text:str,p:Prop,value)->list[tuple]:
- edits=[]
- for call_start,spans,close in p.spans:
-  if len(spans)<_needed_args(p.kind):
-   if p.kind=="checkbox":
-    new='"true"'if value else'"false"'
-   elif p.kind=="text":
-    new='"'+str(value).replace("\\","\\\\").replace('"','\\"')+'"'
-   else:
-    new=_num(value)
-   edits.append((close,close,", "+new))
-   continue
-  a,b=spans[-1]
-  raw=text[a:b]
-  bare=raw.strip()
-  quoted=bare[:1]in"'\""
-  if p.kind=="checkbox":
-   new="true"if value else"false"
-  elif p.kind=="text":
-   new=str(value).replace("\\","\\\\").replace('"','\\"')
-   quoted=True
-  else:
-   new=_num(value)
-  if quoted:
-   q=bare[0]if bare[:1]in"'\""else'"'
-   new=q+new+q
-  pad_l=raw[:len(raw)-len(raw.lstrip())]
-  edits.append((a,b,pad_l+new))
- return edits
-def _apply_edits(text:str,edits:list[tuple])->str:
- for a,b,new in sorted(edits,key=lambda e:e[0],reverse=True):
-  text=text[:a]+new+text[b:]
- return text
-def _rewrite_default(text:str,p:Prop,value)->str:
- return _apply_edits(text,_default_edits(text,p,value))
-def local_script(addon_name:str)->Path:
- p=paths.sw_root()/"data"/"missions"/addon_name/"script.lua"
- if not p.is_file():
-  raise SystemExit(f"no local copy of '{addon_name}' (data/missions) - settings can ""only be edited on addons whose files live there. Addons attached ""straight from the workshop folder keep their files read-only ""under Steam's control")
- return p
-def read(save:Path,addon_name:str,scene)->list[Prop]:
- script=local_script(addon_name)
- text=script.read_text(encoding="utf-8",errors="replace")
- props=parse_schema(text)
- if not props:
-  return props
- sid=_script_id(scene,addon_name)
- if sid is not None:
-  sd=save/"script_data"/f"{sid}.xml"
-  if sd.is_file():
-   data=savedata.load_file(sd)
-   for p in props:
-    if p.saved_path is None:
-     continue
-    node=data
-    for key in p.saved_path:
-     if not isinstance(node,dict)or key not in node:
-      node=None
-      break
-     node=node[key]
-    if isinstance(node,(int,float))and p.kind=="slider":
-     p.saved_value=node/p.saved_scale
-    elif isinstance(node,bool)and p.kind=="checkbox":
-     p.saved_value=node
-    elif isinstance(node,str)and p.kind=="text":
-     p.saved_value=node
- return props
-def _script_id(scene,addon_name:str):
- target=f"data/missions/{addon_name}"
- for s in scene.list_scripts():
-  if s["path"]==target:
-   return s["script_id"]
- return None
-def apply(save:Path,addon_name:str,scene,changes:dict[str,object])->tuple[list[str],dict]:
- script=local_script(addon_name)
- text=script.read_text(encoding="utf-8",errors="replace")
- props={p.label:p for p in parse_schema(text)}
- report=[]
- unknown=[k for k in changes if k not in props]
- if unknown:
-  raise SystemExit("no such setting: "+"; ".join(unknown))
- sid=_script_id(scene,addon_name)
- sd=save/"script_data"/f"{sid}.xml"if sid is not None else None
- data=savedata.load_file(sd)if sd and sd.is_file()else None
- stored=0
- applied={}
- edits=[]
- for label,raw in changes.items():
-  p=props[label]
-  value=p.clamp(raw)
-  applied[label]=value
-  edits+=_default_edits(text,p,value)
-  if data is not None and p.saved_path is not None:
-   node=data
-   for key in p.saved_path[:-1]:
-    if not isinstance(node.get(key),dict):
-     node=None
-     break
-    node=node[key]
-   if node is not None and p.saved_path[-1]in node:
-    node[p.saved_path[-1]]=(value*p.saved_scale if p.kind=="slider"else value)
-    stored+=1
-    continue
-  if data:
-   report.append(f"'{label}': this addon keeps state in the save, but SWAM "f"could not find this setting in it. If the addon stored it "f"there, the save wins and this change does nothing. To force "f"it, reset the addon's state (--reset-state), which makes it "f"start over from the defaults and loses what it remembered")
- original=script.read_bytes()
- text=_apply_edits(text,edits)
- try:
-  with open(script,"w",encoding="utf-8",newline="")as f:
-   f.write(text)
-  report.insert(0,f"defaults updated in {script}")
-  if stored and data is not None:
-   savedata.save_file(sd,data)
-   report.insert(1,f"{stored} value(s) updated in this save's state "f"({sd.name})")
- except BaseException:
-  script.write_bytes(original)
-  raise
- for label,bad in _verify(save,addon_name,scene,applied):
-  report.append(f"'{label}': WRITE DID NOT STICK - {bad}")
- return report,applied
-def _verify(save:Path,addon_name:str,scene,applied:dict):
- bad=[]
- fresh={p.label:p for p in read(save,addon_name,scene)}
- for label,value in applied.items():
-  p=fresh.get(label)
-  if p is None:
-   bad.append((label,"the setting vanished from the script"))
-   continue
-  if p.clamp(p.default)!=p.clamp(value):
-   bad.append((label,f"the script default reads back as {p.default!r}"))
-  elif p.saved_value is not None and p.clamp(p.saved_value)!=p.clamp(value):
-   bad.append((label,f"this save still holds {p.saved_value!r}"))
- return bad
-def reset_state(save:Path,addon_name:str,scene)->Path|None:
- sid=_script_id(scene,addon_name)
- if sid is None:
-  return None
- sd=save/"script_data"/f"{sid}.xml"
- if not sd.is_file():
-  return None
- sd.unlink()
- return sd
-def wanted(lk:dict)->dict:
- out=dict(lk.get("settings")or{})
- for name,rec in(lk.get("addons")or{}).items():
-  s=rec.get("settings")or{}
-  if s:
-   out.setdefault(name,{}).update(s)
- return out
-def drift(save:Path,scene,lk:dict)->list[dict]:
- from.import addons
- out=[]
- for name,want in wanted(lk).items():
-  if not want or addons.attached_value(scene,name)is None:
-   continue
-  try:
-   props={p.label:p for p in read(save,name,scene)}
-  except SystemExit:
-   continue
-  for label,value in want.items():
-   p=props.get(label)
-   if p is None:
-    continue
-   got=p.saved_value if p.saved_value is not None else p.default
-   if p.clamp(got)!=p.clamp(value):
-    out.append({"addon":name,"label":label,"want":p.clamp(value),"got":p.clamp(got),"where":"this save"if p.saved_value is not None else"the addon's files"})
- return out
+    def __init__(self, kind, label, default, minimum=None, maximum=None, step=None):
+        self.kind = kind
+        self.label = label
+        self.default = default
+        self.minimum = minimum
+        self.maximum = maximum
+        self.step = step
+        self.spans = []
+        self.saved_path = None
+        self.saved_scale = 1.0
+        self.saved_value = None
+
+    def clamp(self, value):
+        if self.kind == "checkbox":
+            if isinstance(value, str):
+                return value.strip().lower() in ("true", "1", "on", "yes")
+            return bool(value)
+        if self.kind == "text":
+            return str(value)
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            raise SystemExit(
+                f"'{self.label}' is a slider - it needs a number between "
+                f"{_num(self.minimum)} and {_num(self.maximum)}, "
+                f"not {value!r}"
+            )
+        if self.step:
+            v = self.minimum + round((v - self.minimum) / self.step) * self.step
+        v = max(self.minimum, min(self.maximum, v))
+        return round(v, 10)
+
+
+def _split_args(text: str, open_paren: int):
+    depth, i, quote = 1, open_paren + 1, None
+    start, spans = i, []
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\":
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                spans.append((start, i))
+                return spans, i
+        elif c == "," and depth == 1:
+            spans.append((start, i))
+            start = i + 1
+        i += 1
+    return None, None
+
+
+def _value(raw: str):
+    s = raw.strip()
+    if len(s) >= 2 and s[0] in "'\"" and s[-1] == s[0]:
+        s = s[1:-1]
+    low = s.strip().lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    try:
+        return float(s)
+    except ValueError:
+        return s
+
+
+def _num(v) -> str:
+    f = float(v)
+    return str(int(f)) if f == int(f) else repr(f)
+
+
+def _dead_ranges(text: str) -> list[tuple]:
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "'\"":
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if text[j] == "\\" else 1
+            i = j + 1
+            continue
+        if text.startswith("[[", i):
+            j = text.find("]]", i + 2)
+            i = n if j == -1 else j + 2
+            continue
+        if text.startswith("--", i):
+            if text.startswith("--[[", i):
+                j = text.find("]]", i + 4)
+                end = n if j == -1 else j + 2
+            else:
+                j = text.find("\n", i)
+                end = n if j == -1 else j
+            out.append((i, end))
+            i = end
+            continue
+        i += 1
+    return out
+
+
+def _in_dead(pos: int, dead: list[tuple]) -> bool:
+    return any(a <= pos < b for a, b in dead)
+
+
+def code_view(text: str) -> str:
+    out = list(text)
+    for a, b in _dead_ranges(text):
+        for i in range(a, b):
+            if out[i] != "\n":
+                out[i] = " "
+    return "".join(out)
+
+
+def parse_schema(text: str) -> list[Prop]:
+    props: dict[str, Prop] = {}
+    dead = _dead_ranges(text)
+    for m in CALL_RE.finditer(text):
+        if _in_dead(m.start(), dead):
+            continue
+        open_paren = text.index("(", m.end() - 1)
+        spans, close = _split_args(text, open_paren)
+        if spans is None or not spans:
+            continue
+        kind = m.group(1)
+        args = [_value(text[a:b]) for a, b in spans]
+        label = args[0]
+        if not isinstance(label, str):
+            continue
+        try:
+            if kind == "slider":
+                if len(args) >= 5:
+                    mn, mx, st, df = args[1], args[2], args[3], args[4]
+                elif len(args) == 4:
+                    mn, mx, st, df = args[1], args[2], 1.0, args[3]
+                else:
+                    continue
+                p = Prop("slider", label, float(df), float(mn), float(mx), float(st))
+            elif kind == "checkbox":
+                df = args[1] if len(args) > 1 else False
+                p = Prop("checkbox", label, df is True)
+            else:
+                p = Prop("text", label, str(args[1]) if len(args) > 1 else "")
+        except (TypeError, ValueError):
+            continue
+        p = props.setdefault(label, p)
+        if p.kind == kind:
+            p.spans.append((m.start(), spans, close))
+    _trace_savedata(code_view(text), props)
+    return list(props.values())
+
+
+def _call_span_at(props, pos):
+    for p in props.values():
+        for call_start, spans, close in p.spans:
+            if call_start <= pos <= close:
+                return p, call_start, close
+    return None, None, None
+
+
+def _var_names(text: str, props) -> dict[str, tuple]:
+    out = {}
+    for p in props.values():
+        for call_start, spans, close in p.spans:
+            head = text[:call_start]
+            m = re.search(
+                r"(?:local\s+)?((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*=\s*$", head
+            )
+            if m and not m.group(1).startswith("g_savedata"):
+                scale = _scale_after(text, close)
+                out[m.group(1)] = (p, scale)
+    return out
+
+
+def _trace_assignments(text: str, variables: dict, props: dict) -> None:
+    for m in re.finditer(r"g_savedata((?:\.[A-Za-z_]\w*)+)\s*=(?!=)\s*", text):
+        path = tuple(m.group(1).lstrip(".").split("."))
+        at = m.end()
+        for _ in range(5):
+            end = text.find("\n", at)
+            if end < 0:
+                end = len(text)
+                break
+            if not re.search(
+                r"(?:\bor\b|\band\b|[-+*/,({]|\.\.)\s*$", text[m.end() : end]
+            ):
+                break
+            at = end + 1
+        found = _rhs_property(text, m.end(), end, variables, props)
+        if found is None:
+            continue
+        p, scale = found
+        if p.saved_path is None:
+            p.saved_path = path
+            p.saved_scale = scale
+
+
+def _rhs_property(text: str, start: int, end: int, variables: dict, props: dict):
+    tail = start
+    for om in re.finditer(r"\bor\b", text[start:end]):
+        tail = start + om.end()
+    while tail < end and text[tail] in " \t\r\n":
+        tail += 1
+    expr = text[tail:end].strip()
+    p, call_start, close = _call_span_at(props, tail)
+    if p is not None and call_start == tail:
+        return p, _scale_after(text, close)
+    vm = re.fullmatch(r"((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)((?:\s*\*\s*[\d.]+)*)", expr)
+    if vm is None or vm.group(1) not in variables:
+        return None
+    p, scale = variables[vm.group(1)]
+    for f in vm.group(2).split("*"):
+        f = f.strip()
+        if f:
+            scale *= float(f)
+    return p, scale
+
+
+def _scale_after(text: str, close: int) -> float:
+    scale = 1.0
+    for f in re.match(r"(\s*\*\s*[\d.]+)*", text[close + 1 :]).group(0).split("*"):
+        f = f.strip()
+        if f:
+            scale *= float(f)
+    return scale
+
+
+def _trace_savedata(text: str, props: dict) -> None:
+    variables = _var_names(text, props)
+    m = re.search(r"g_savedata\s*=\s*{", text)
+    if m:
+        spans, close = _split_args(text, m.end() - 1)
+        if spans is not None:
+            _trace_table(text, spans, (), variables, props, m.end())
+    _trace_assignments(text, variables, props)
+    _trace_readbacks(text, variables, props)
+
+
+def _trace_readbacks(text: str, variables: dict, props: dict) -> None:
+    for m in re.finditer(
+        r"(?:local\s+)?((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*=(?!=)\s*"
+        "g_savedata((?:\.[A-Za-z_]\w*)+)\s*(?:$|[^.\w(])",
+        text,
+        re.M,
+    ):
+        name = m.group(1)
+        if name not in variables:
+            continue
+        p, scale = variables[name]
+        if p.saved_path is None:
+            p.saved_path = tuple(m.group(2).lstrip(".").split("."))
+            p.saved_scale = scale
+
+
+def _trace_table(text, entry_spans, path, variables, props, table_start):
+    index = 0
+    for a, b in entry_spans:
+        entry = text[a:b]
+        if not entry.strip():
+            continue
+        km = re.match(r'\s*(?:([A-Za-z_]\w*)|\[\s*"([^"]*)"\s*\])\s*=\s*', entry)
+        if km:
+            key = km.group(1) or km.group(2)
+            expr_at = a + km.end()
+        else:
+            index += 1
+            key, expr_at = index, a + len(entry) - len(entry.lstrip())
+        expr = text[expr_at:b].strip()
+        tm = re.match(r"{", expr)
+        if tm:
+            sub_spans, _ = _split_args(text, expr_at + expr.index("{"))
+            if sub_spans:
+                _trace_table(text, sub_spans, path + (key,), variables, props, expr_at)
+            continue
+        p, call_start, close = _call_span_at(props, expr_at)
+        if p and expr_at <= call_start < b:
+            p.saved_path = path + (key,)
+            p.saved_scale = _scale_after(text, close)
+            continue
+        vm = re.match(r"([A-Za-z_]\w*)((?:\s*\*\s*[\d.]+)*)\s*$", expr)
+        if vm and vm.group(1) in variables:
+            p, scale = variables[vm.group(1)]
+            for f in vm.group(2).split("*"):
+                f = f.strip()
+                if f:
+                    scale *= float(f)
+            p.saved_path = path + (key,)
+            p.saved_scale = scale
+
+
+def _needed_args(kind: str) -> int:
+    return 4 if kind == "slider" else 2
+
+
+def _default_edits(text: str, p: Prop, value) -> list[tuple]:
+    edits = []
+    for call_start, spans, close in p.spans:
+        if len(spans) < _needed_args(p.kind):
+            if p.kind == "checkbox":
+                new = '"true"' if value else '"false"'
+            elif p.kind == "text":
+                new = '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+            else:
+                new = _num(value)
+            edits.append((close, close, ", " + new))
+            continue
+        a, b = spans[-1]
+        raw = text[a:b]
+        bare = raw.strip()
+        quoted = bare[:1] in "'\""
+        if p.kind == "checkbox":
+            new = "true" if value else "false"
+        elif p.kind == "text":
+            new = str(value).replace("\\", "\\\\").replace('"', '\\"')
+            quoted = True
+        else:
+            new = _num(value)
+        if quoted:
+            q = bare[0] if bare[:1] in "'\"" else '"'
+            new = q + new + q
+        pad_l = raw[: len(raw) - len(raw.lstrip())]
+        edits.append((a, b, pad_l + new))
+    return edits
+
+
+def _apply_edits(text: str, edits: list[tuple]) -> str:
+    for a, b, new in sorted(edits, key=lambda e: e[0], reverse=True):
+        text = text[:a] + new + text[b:]
+    return text
+
+
+def _rewrite_default(text: str, p: Prop, value) -> str:
+    return _apply_edits(text, _default_edits(text, p, value))
+
+
+def local_script(addon_name: str) -> Path:
+    p = paths.sw_root() / "data" / "missions" / addon_name / "script.lua"
+    if not p.is_file():
+        raise SystemExit(
+            f"no local copy of '{addon_name}' (data/missions) - settings can "
+            "only be edited on addons whose files live there. Addons attached "
+            "straight from the workshop folder keep their files read-only "
+            "under Steam's control"
+        )
+    return p
+
+
+def read(save: Path, addon_name: str, scene) -> list[Prop]:
+    script = local_script(addon_name)
+    text = script.read_text(encoding="utf-8", errors="replace")
+    props = parse_schema(text)
+    if not props:
+        return props
+    sid = _script_id(scene, addon_name)
+    if sid is not None:
+        sd = save / "script_data" / f"{sid}.xml"
+        if sd.is_file():
+            data = savedata.load_file(sd)
+            for p in props:
+                if p.saved_path is None:
+                    continue
+                node = data
+                for key in p.saved_path:
+                    if not isinstance(node, dict) or key not in node:
+                        node = None
+                        break
+                    node = node[key]
+                if isinstance(node, (int, float)) and p.kind == "slider":
+                    p.saved_value = node / p.saved_scale
+                elif isinstance(node, bool) and p.kind == "checkbox":
+                    p.saved_value = node
+                elif isinstance(node, str) and p.kind == "text":
+                    p.saved_value = node
+    return props
+
+
+def _script_id(scene, addon_name: str):
+    target = f"data/missions/{addon_name}"
+    for s in scene.list_scripts():
+        if s["path"] == target:
+            return s["script_id"]
+    return None
+
+
+def apply(
+    save: Path, addon_name: str, scene, changes: dict[str, object]
+) -> tuple[list[str], dict]:
+    script = local_script(addon_name)
+    text = script.read_text(encoding="utf-8", errors="replace")
+    props = {p.label: p for p in parse_schema(text)}
+    report = []
+    unknown = [k for k in changes if k not in props]
+    if unknown:
+        raise SystemExit("no such setting: " + "; ".join(unknown))
+    sid = _script_id(scene, addon_name)
+    sd = save / "script_data" / f"{sid}.xml" if sid is not None else None
+    data = savedata.load_file(sd) if sd and sd.is_file() else None
+    stored = 0
+    applied = {}
+    edits = []
+    for label, raw in changes.items():
+        p = props[label]
+        value = p.clamp(raw)
+        applied[label] = value
+        edits += _default_edits(text, p, value)
+        if data is not None and p.saved_path is not None:
+            node = data
+            for key in p.saved_path[:-1]:
+                if not isinstance(node.get(key), dict):
+                    node = None
+                    break
+                node = node[key]
+            if node is not None and p.saved_path[-1] in node:
+                node[p.saved_path[-1]] = (
+                    value * p.saved_scale if p.kind == "slider" else value
+                )
+                stored += 1
+                continue
+        if data:
+            report.append(
+                f"'{label}': this addon keeps state in the save, but SWAM "
+                f"could not find this setting in it. If the addon stored it "
+                f"there, the save wins and this change does nothing. To force "
+                f"it, reset the addon's state (--reset-state), which makes it "
+                f"start over from the defaults and loses what it remembered"
+            )
+    original = script.read_bytes()
+    text = _apply_edits(text, edits)
+    try:
+        with open(script, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        report.insert(0, f"defaults updated in {script}")
+        if stored and data is not None:
+            savedata.save_file(sd, data)
+            report.insert(
+                1, f"{stored} value(s) updated in this save's state " f"({sd.name})"
+            )
+    except BaseException:
+        script.write_bytes(original)
+        raise
+    for label, bad in _verify(save, addon_name, scene, applied):
+        report.append(f"'{label}': WRITE DID NOT STICK - {bad}")
+    return report, applied
+
+
+def _verify(save: Path, addon_name: str, scene, applied: dict):
+    bad = []
+    fresh = {p.label: p for p in read(save, addon_name, scene)}
+    for label, value in applied.items():
+        p = fresh.get(label)
+        if p is None:
+            bad.append((label, "the setting vanished from the script"))
+            continue
+        if p.clamp(p.default) != p.clamp(value):
+            bad.append((label, f"the script default reads back as {p.default!r}"))
+        elif p.saved_value is not None and p.clamp(p.saved_value) != p.clamp(value):
+            bad.append((label, f"this save still holds {p.saved_value!r}"))
+    return bad
+
+
+def reset_state(save: Path, addon_name: str, scene) -> Path | None:
+    sid = _script_id(scene, addon_name)
+    if sid is None:
+        return None
+    sd = save / "script_data" / f"{sid}.xml"
+    if not sd.is_file():
+        return None
+    sd.unlink()
+    return sd
+
+
+def wanted(lk: dict) -> dict:
+    out = dict(lk.get("settings") or {})
+    for name, rec in (lk.get("addons") or {}).items():
+        s = rec.get("settings") or {}
+        if s:
+            out.setdefault(name, {}).update(s)
+    return out
+
+
+def drift(save: Path, scene, lk: dict) -> list[dict]:
+    from . import addons
+
+    out = []
+    for name, want in wanted(lk).items():
+        if not want or addons.attached_value(scene, name) is None:
+            continue
+        try:
+            props = {p.label: p for p in read(save, name, scene)}
+        except SystemExit:
+            continue
+        for label, value in want.items():
+            p = props.get(label)
+            if p is None:
+                continue
+            got = p.saved_value if p.saved_value is not None else p.default
+            if p.clamp(got) != p.clamp(value):
+                out.append(
+                    {
+                        "addon": name,
+                        "label": label,
+                        "want": p.clamp(value),
+                        "got": p.clamp(got),
+                        "where": (
+                            "this save"
+                            if p.saved_value is not None
+                            else "the addon's files"
+                        ),
+                    }
+                )
+    return out
