@@ -12,11 +12,13 @@ you do after a world is created. Works on **Windows** and **Linux / Steam Deck**
 
 
 
-> ## About AI and accusations
-> English is not my native language, so this README was written with AI assistance.
-> The entire project logic, architecture, and code were written by me. AI was used **afterwards** only for English text, comments, and readability improvements. I wanted the code to be very understandable and readable.
-> After a wave of accusations, "AI slop" claims, and demands to remove any trace of AI, I stripped out **all** comments and formatting. The code now ships in a raw, minified state. It works perfectly - that's what matters.
-> If you're here just to complain about AI readme or question the authenticity of the project - **go fuck yourself**. I have zero interest in arguing with your biases. The tool solves a real problem and actually works.
+> ## About AI
+> English is not my native language, so this README was written with AI
+> assistance. The project's logic, architecture and code are mine. AI came in
+> afterwards, for the English text, the comments and general readability,
+> because I wanted the code to be easy to follow.
+> Comments and formatting were later stripped out of the shipped code, so what
+> you get is raw and unadorned. It works, and that is what the tool is for.
 ---
 
 
